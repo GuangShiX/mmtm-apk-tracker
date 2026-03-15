@@ -1,0 +1,14 @@
+{
+    "package_name": "jp.boi.mementomori.android",
+    "apkeep_path": "bin/apkeep.exe",
+    "source": "apk-pure",
+    "google_play": {
+        "email": "",
+        "token": ""
+    },
+    "dirs": {
+        "apks": "apks",
+        "extracted": "extracted",
+        "reports": "reports"
+    }
+}

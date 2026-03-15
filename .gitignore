@@ -1,0 +1,7 @@
+# .gitignore
+bin/
+apks/
+extracted/
+reports/
+__pycache__/
+*.pyc
