@@ -4,11 +4,15 @@ import json
 import subprocess
 import sys
 import re
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    """把 4.10.0 这类版本号转成可排序 tuple。"""
+    return tuple(int(part) for part in version.split(".") if part.isdigit())
 
 
 def verify_zip(path: Path) -> bool:
@@ -46,32 +50,36 @@ def list_remote_versions() -> list[str]:
     """查询 APKPure 上可用的版本列表"""
     apkeep = ROOT / CONFIG["apkeep_path"]
     pkg = CONFIG["package_name"]
+    if not apkeep.exists():
+        print(f"未找到 apkeep: {apkeep}")
+        return []
+
     try:
         result = subprocess.run(
             [str(apkeep), "-a", pkg, "-d", "apk-pure", "--list-versions", "."],
             capture_output=True, text=True, timeout=30,
         )
-        # 解析输出: "| 3.19.1, 3.19.2, ..."
-        for line in result.stdout.splitlines():
-            if line.startswith("|"):
-                versions = [v.strip() for v in line.lstrip("| ").split(",")]
-                return sorted(versions, key=lambda v: [int(x) for x in v.split(".")])
+        output = "\n".join([result.stdout, result.stderr])
+        versions = set(re.findall(r"\b\d+\.\d+\.\d+\b", output))
+        return sorted(versions, key=version_key)
     except Exception as e:
         print(f"查询版本列表失败: {e}")
     return []
 
 
-def list_local_versions() -> list[str]:
+def list_local_versions(complete_only: bool = False) -> list[str]:
     """列出本地已下载的所有版本号"""
     apks_dir = ROOT / CONFIG["dirs"]["apks"]
     if not apks_dir.exists():
         return []
     versions = []
     for f in list(apks_dir.glob("*.apk")) + list(apks_dir.glob("*.xapk")):
+        if complete_only and not verify_zip(f):
+            continue
         v = get_apk_version(f)
         if v:
             versions.append(v)
-    return sorted(set(versions), key=lambda v: [int(x) for x in v.split(".")])
+    return sorted(set(versions), key=version_key)
 
 
 def find_local_apk(version: str) -> Path | None:

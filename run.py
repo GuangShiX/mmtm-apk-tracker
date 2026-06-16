@@ -1,84 +1,144 @@
-"""一键执行全流程 — 下载 → 解包 → 对比"""
+"""自动更新流程：检查远端版本 -> 下载 -> 解包 -> 生成差异报告。"""
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
-from download import download_apk, get_apk_version, list_local_versions
-from extract import extract_version, find_apk
-from diff import run_diff, list_extracted_versions
+from diff import list_extracted_versions, run_diff
+from download import (
+    download_apk,
+    find_local_apk,
+    list_local_versions,
+    list_remote_versions,
+    verify_zip,
+    version_key,
+)
 
 ROOT = Path(__file__).parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 
 
-def get_latest_extracted_version() -> str | None:
-    """获取最新的已解包版本"""
-    versions = list_extracted_versions()
-    return versions[-1] if versions else None
+def latest_version(versions: list[str]) -> str | None:
+    return sorted(versions, key=version_key)[-1] if versions else None
 
 
-def main():
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="检查 MementoMori 最新 APK，发现更新后自动下载并解包。"
+    )
+    parser.add_argument(
+        "source",
+        nargs="?",
+        choices=("apk-pure", "google-play"),
+        default=None,
+        help="下载源，默认读取 config.json",
+    )
+    parser.add_argument(
+        "--version",
+        help="指定目标版本；不指定时自动检查 APKPure 远端最新版",
+    )
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="只检查是否有新版本，不下载或解包",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="即使 manifest.json 已存在也重新解包",
+    )
+    parser.add_argument(
+        "--skip-download",
+        action="store_true",
+        help="只使用本地已有完整 APK/XAPK；缺失时直接失败",
+    )
+    return parser.parse_args()
+
+
+def resolve_target_version(requested: str | None) -> str | None:
+    if requested:
+        return requested
+
+    print("检查远端版本...")
+    remote_versions = list_remote_versions()
+    if not remote_versions:
+        print("未能获取远端版本列表")
+        return None
+
+    remote_latest = latest_version(remote_versions)
+    print(f"远端最新版本: {remote_latest}")
+    return remote_latest
+
+
+def ensure_apk(version: str, source: str | None, skip_download: bool) -> Path | None:
+    local = find_local_apk(version)
+    if local and verify_zip(local):
+        print(f"使用本地完整包: {local.name}")
+        return local
+
+    if local:
+        print(f"本地包不完整，将重新下载: {local.name}")
+        local.unlink()
+
+    if skip_download:
+        print(f"本地没有完整的 {version} APK/XAPK，且指定了 --skip-download")
+        return None
+
+    return download_apk(source=source, version=version)
+
+
+def main() -> int:
+    args = parse_args()
+    source = args.source or CONFIG.get("source", "apk-pure")
+
     print("=" * 60)
-    print("MementoMori APK Tracker — 一键执行")
+    print("MementoMori APK Tracker")
     print("=" * 60)
+    print(f"下载源: {source}")
 
-    source = None
-    skip_download = False
+    extracted_versions = list_extracted_versions()
+    local_versions = list_local_versions(complete_only=True)
+    current_version = latest_version(extracted_versions)
 
-    for arg in sys.argv[1:]:
-        if arg == "--skip-download":
-            skip_download = True
-        elif arg in ("apk-pure", "google-play"):
-            source = arg
+    print(f"已解包版本: {', '.join(extracted_versions) if extracted_versions else '无'}")
+    print(f"本地完整包: {', '.join(local_versions) if local_versions else '无'}")
 
-    # Step 0: 记录旧版本
-    old_version = get_latest_extracted_version()
-    if old_version:
-        print(f"\n当前最新已解包版本: {old_version}")
-    else:
-        print("\n暂无已解包版本（首次运行）")
+    target_version = resolve_target_version(args.version)
+    if not target_version:
+        return 1
 
-    # Step 1: 下载
-    if not skip_download:
-        print("\n--- Step 1: 下载 APK ---")
-        apk_path = download_apk(source)
-        if not apk_path:
-            print("下载失败，退出")
-            sys.exit(1)
-        new_version = get_apk_version(apk_path)
-    else:
-        print("\n--- Step 1: 跳过下载 ---")
-        # 找本地最新的 APK
-        local = list_local_versions()
-        if not local:
-            print("本地无 APK 文件，请先下载")
-            sys.exit(1)
-        new_version = local[-1]
-        print(f"使用本地最新版本: {new_version}")
+    if args.check_only:
+        if current_version == target_version:
+            print(f"当前已是最新版本: {current_version}")
+        else:
+            print(f"发现可更新版本: {current_version or '无'} -> {target_version}")
+        return 0
 
-    if not new_version:
-        print("无法确定版本号，退出")
-        sys.exit(1)
+    if current_version == target_version and not args.force:
+        print(f"当前已是最新版本且已解包: {target_version}")
+        return 0
 
-    # Step 2: 解包
-    print(f"\n--- Step 2: 解包 v{new_version} ---")
-    out_dir = extract_version(new_version)
+    apk_path = ensure_apk(target_version, source, args.skip_download)
+    if not apk_path:
+        return 1
+
+    print(f"\n开始解包: {target_version}")
+    from extract import extract_version
+
+    out_dir = extract_version(target_version, force=args.force)
     if not out_dir:
-        print("解包失败，退出")
-        sys.exit(1)
+        return 1
 
-    # Step 3: 对比
-    if old_version and old_version != new_version:
-        print(f"\n--- Step 3: 对比 {old_version} → {new_version} ---")
-        run_diff(old_version, new_version)
-    elif old_version == new_version:
-        print(f"\n--- Step 3: 版本未变化 ({new_version})，跳过对比 ---")
-    else:
-        print(f"\n--- Step 3: 首次运行，无旧版本可对比 ---")
+    if current_version and current_version != target_version:
+        print(f"\n生成差异报告: {current_version} -> {target_version}")
+        run_diff(current_version, target_version)
+    elif not current_version:
+        print("\n首次解包，没有旧版本可对比")
 
-    print("\n完成!")
+    print("\n完成")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
