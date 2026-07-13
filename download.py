@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import re
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -15,21 +16,16 @@ def version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split(".") if part.isdigit())
 
 
-def verify_zip(path: Path) -> bool:
-    """验证文件是否是完整的 ZIP/APK/XAPK"""
+def verify_zip(path: Path, deep: bool = False) -> bool:
+    """验证 ZIP 目录；deep=True 时读取所有条目并校验 CRC。"""
     try:
-        with open(path, "rb") as f:
-            header = f.read(4)
-            if header[:2] != b"PK":
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        with zipfile.ZipFile(path) as archive:
+            if not archive.infolist():
                 return False
-            # 检查尾部有 EOCD 标记
-            f.seek(0, 2)
-            size = f.tell()
-            search_size = min(size, 1024 * 1024)
-            f.seek(size - search_size)
-            tail = f.read()
-            return tail.rfind(b"PK\x05\x06") >= 0 or tail.rfind(b"PK\x06\x06") >= 0
-    except OSError:
+            return archive.testzip() is None if deep else True
+    except (OSError, zipfile.BadZipFile, EOFError):
         return False
 
 
@@ -140,43 +136,49 @@ def download_apk(source: str | None = None, version: str | None = None) -> Path 
 
     print(f"正在下载 {app_spec} (源: {source})...")
     print(f"命令: {' '.join(cmd)}")
-    print("（游戏 XAPK 约 600MB+，请耐心等待...）")
+    print("（游戏 XAPK 通常超过 1 GB，请耐心等待...）")
 
-    try:
-        # 大文件需要更长超时（20分钟）
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
-        if result.stdout.strip():
-            print(result.stdout.strip())
-        if result.stderr.strip():
-            print(result.stderr.strip())
-        if result.returncode != 0:
-            print(f"下载失败 (exit code {result.returncode})")
-            return None
-    except subprocess.TimeoutExpired:
-        print("下载超时（20分钟），请检查网络后重试")
-        return None
+    retries = max(1, int(CONFIG.get("download_retries", 3)))
+    timeout = max(60, int(CONFIG.get("download_timeout_seconds", 1800)))
+    deep_verify = bool(CONFIG.get("verify_download_crc", True))
+    apk_file = None
+    for attempt in range(1, retries + 1):
+        print(f"下载尝试: {attempt}/{retries}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"下载超时（{timeout // 60} 分钟）")
+            result = None
+        if result is not None:
+            if result.stdout.strip():
+                print(result.stdout.strip())
+            if result.stderr.strip():
+                print(result.stderr.strip())
+            if result.returncode != 0:
+                print(f"下载失败 (exit code {result.returncode})")
 
-    # 找到新下载的文件
-    downloaded = sorted(
-        list(apks_dir.glob(f"{pkg}*")),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
-    if not downloaded:
-        print("未找到下载的文件")
-        return None
+        apk_file = find_local_apk(version) if version else None
+        if apk_file is None:
+            downloaded = sorted(
+                list(apks_dir.glob(f"{pkg}*")),
+                key=lambda file: file.stat().st_mtime,
+                reverse=True,
+            )
+            apk_file = downloaded[0] if downloaded else None
+        if apk_file is None:
+            print("未找到下载的文件")
+            continue
 
-    apk_file = downloaded[0]
-
-    # 验证完整性
-    if not verify_zip(apk_file):
+        print("验证下载包完整性（CRC）..." if deep_verify else "验证下载包目录...")
+        if verify_zip(apk_file, deep=deep_verify):
+            break
         size_mb = apk_file.stat().st_size / 1024 / 1024
-        print(f"警告: 下载的文件不完整 ({size_mb:.1f} MB)，可能需要重试")
-        # 如果文件名没有版本号，尝试重命名
-        if version and version not in apk_file.name:
-            new_name = apk_file.with_name(f"{pkg}@{version}{apk_file.suffix}")
-            apk_file.rename(new_name)
-            apk_file = new_name
+        print(f"下载包校验失败 ({size_mb:.1f} MB)，删除后重试")
+        apk_file.unlink(missing_ok=True)
+        apk_file = None
+
+    if apk_file is None:
+        print(f"下载失败，已尝试 {retries} 次")
         return None
 
     # 重命名加上版本号（如果文件名没有）

@@ -1,80 +1,44 @@
 # AGENTS.md
 
-## Project Overview
+## Project Goal
 
-MementoMori APK Tracker 是一个 Python 自动化工具链，用于检查 MementoMori Android 包更新、下载 APK/XAPK、解包 Unity AssetBundle，并输出版本资源差异。
-
-当前项目目标是保持核心流程精简：
-
-```text
-check latest version -> download package -> extract assets -> diff manifests
-```
+MementoMori APK Tracker must automatically detect game updates, download and validate APK/XAPK packages, preserve all package and Unity serialized data, export supported resources to usable formats, and generate version diffs.
 
 ## Core Files
 
-- `run.py` - 自动更新入口。默认检查远端最新版，发现新版本后下载、解包、生成 diff。
-- `download.py` - 使用 `bin/apkeep.exe` 下载 APK/XAPK，并校验 ZIP 完整性。
-- `extract.py` - 使用 UnityPy 解包 XAPK 中的 catalog、Unity 数据、AssetBundle 资源和 Prefab 层级。
-- `diff.py` - 对比两个版本的 `manifest.json`，输出 txt/json 报告。
-- `config.json` - 包名、下载源和目录配置。
-- `bin/apkeep.exe` - APK 下载工具，核心流程必需。
+- `run.py`: one-shot and `--watch` automatic update entrypoint.
+- `download.py`: apkeep integration, retries, ZIP directory and CRC validation.
+- `extract.py`: complete archive expansion, raw object preservation, decoded exports, Prefab derivation, and coverage report.
+- `diff.py`: SQLite manifest comparison.
+- `config.json`: update interval, retry, verification, and directory settings.
+- `scripts/install_windows_task.ps1`: recurring Windows scheduled task installer.
+- `tests/`: standard-library regression tests.
 
-## Generated Directories
+## Completeness Invariant
 
-这些目录由脚本自动生成，不应提交到 git：
+Extraction may be marked `complete` only when:
 
-- `apks/` - 下载的 APK/XAPK
-- `extracted/` - 解包输出
-- `reports/` - 版本差异报告
-- `__pycache__/` - Python 缓存
+- the source package was fully expanded and `package_manifest.json` was written;
+- at least one AssetBundle and one Unity object were found;
+- every discovered Unity source loaded successfully;
+- every enumerated Unity object was written to `objects_raw/`;
+- `manifest.sqlite3` contains one indexed row for every enumerated Unity object;
+- `extraction_report.json` reports `status: complete` and raw object coverage 1.0.
 
-## Usage
+Interrupted extraction resumes from the committed `manifest.sqlite3.tmp` rows. The manifest uses SQLite WAL durability; a partially indexed Unity source is deleted and re-exported before completion.
+
+Decoded files are additional convenience outputs. Unsupported proprietary structures must remain available through `raw/` and `objects_raw/`, with fallbacks/errors explicitly reported.
+
+## Commands
 
 ```bash
-# 自动检查更新；有新版本时下载并解包
 python run.py
-
-# 只检查远端是否有更新
+python run.py --watch
 python run.py --check-only
-
-# 指定版本
-python run.py --version 4.10.0
-
-# 只使用本地已有完整包，不下载
-python run.py --version 4.10.0 --skip-download
-
-# 强制重新解包
-python run.py --version 4.10.0 --force
+python run.py --version 4.18.0 --force
+python -m unittest discover -s tests -v
 ```
 
-也可以单独执行：
+## Generated Data
 
-```bash
-python download.py apk-pure 4.10.0
-python extract.py 4.10.0
-python diff.py 4.9.0 4.10.0
-```
-
-## Dependencies
-
-- Python 3.10+
-- UnityPy 1.25.0+
-- apkeep v0.18.0 at `bin/apkeep.exe`
-
-Install Python dependency:
-
-```bash
-pip install UnityPy
-```
-
-## Cleanup Policy
-
-不要重新引入非核心工具目录，除非用户明确要求：
-
-- AssetStudio
-- AssetStudioMod
-- AssetRipper
-- Unity Prefab 重建工具
-- Il2CppDumper
-
-这些不是当前自动更新、下载、解包链路的必需组件。历史导出产物和报告也应视为可再生成数据。
+Do not commit `apks/`, `extracted/`, `reports/`, or Python caches. Do not reintroduce AssetStudio, AssetRipper, Unity Editor rebuild tools, or Il2CppDumper unless explicitly requested.

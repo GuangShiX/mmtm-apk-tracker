@@ -3,5 +3,6 @@ bin/
 apks/
 extracted/
 reports/
+.tracker.lock
 __pycache__/
 *.pyc

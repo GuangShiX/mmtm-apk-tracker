@@ -2,7 +2,11 @@
 
 import argparse
 import json
+import os
 import sys
+import time
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from diff import list_extracted_versions, run_diff
@@ -17,6 +21,41 @@ from download import (
 
 ROOT = Path(__file__).parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+
+
+@contextmanager
+def single_instance_lock():
+    """Prevent watch/task instances from processing the same version concurrently."""
+    lock_path = ROOT / ".tracker.lock"
+    stream = lock_path.open("a+b")
+    stream.seek(0, os.SEEK_END)
+    if stream.tell() == 0:
+        stream.write(b"0")
+        stream.flush()
+    stream.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        stream.close()
+        yield False
+        return
+
+    try:
+        yield True
+    finally:
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        stream.close()
 
 
 def latest_version(versions: list[str]) -> str | None:
@@ -46,12 +85,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="即使 manifest.json 已存在也重新解包",
+        help="即使完整清单已存在也清除断点并重新解包",
     )
     parser.add_argument(
         "--skip-download",
         action="store_true",
         help="只使用本地已有完整 APK/XAPK；缺失时直接失败",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="持续运行，按间隔自动检查并处理新版本",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=None,
+        help="持续模式检查间隔（秒），默认读取 config.json",
     )
     return parser.parse_args()
 
@@ -73,7 +123,8 @@ def resolve_target_version(requested: str | None) -> str | None:
 
 def ensure_apk(version: str, source: str | None, skip_download: bool) -> Path | None:
     local = find_local_apk(version)
-    if local and verify_zip(local):
+    deep_verify = bool(CONFIG.get("verify_download_crc", True))
+    if local and verify_zip(local, deep=deep_verify):
         print(f"使用本地完整包: {local.name}")
         return local
 
@@ -88,8 +139,7 @@ def ensure_apk(version: str, source: str | None, skip_download: bool) -> Path | 
     return download_apk(source=source, version=version)
 
 
-def main() -> int:
-    args = parse_args()
+def run_once(args: argparse.Namespace) -> int:
     source = args.source or CONFIG.get("source", "apk-pure")
 
     print("=" * 60)
@@ -138,6 +188,34 @@ def main() -> int:
 
     print("\n完成")
     return 0
+
+
+def main() -> int:
+    args = parse_args()
+    with single_instance_lock() as acquired:
+        if not acquired:
+            print("另一个自动更新实例正在运行，本次退出")
+            return 0
+        if not args.watch:
+            return run_once(args)
+
+        interval = args.interval or int(CONFIG.get("check_interval_seconds", 3600))
+        if interval < 60:
+            print("持续模式检查间隔不能少于 60 秒")
+            return 2
+
+        print(f"持续自动更新已启动，检查间隔: {interval} 秒")
+        try:
+            while True:
+                result = run_once(args)
+                next_check = datetime.now() + timedelta(seconds=interval)
+                if result != 0:
+                    print(f"本轮处理失败，将在下个周期重试 (exit code {result})")
+                print(f"下次检查: {next_check:%Y-%m-%d %H:%M:%S}")
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n持续自动更新已停止")
+            return 0
 
 
 if __name__ == "__main__":

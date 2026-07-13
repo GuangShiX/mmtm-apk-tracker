@@ -1,6 +1,7 @@
 """版本对比模块 — 比较两个版本的 manifest，生成变更报告"""
 
 import json
+import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -9,55 +10,73 @@ ROOT = Path(__file__).parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 
 
-def load_manifest(version: str) -> dict:
-    """加载指定版本的 manifest.json"""
-    path = ROOT / CONFIG["dirs"]["extracted"] / version / "manifest.json"
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split(".") if part.isdigit())
+
+
+def manifest_path(version: str) -> Path:
+    path = ROOT / CONFIG["dirs"]["extracted"] / version / "manifest.sqlite3"
     if not path.exists():
         raise FileNotFoundError(f"未找到版本 {version} 的 manifest: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return path
 
 
 def diff_versions(old_ver: str, new_ver: str) -> dict:
-    """对比两个版本，返回 diff 结果"""
-    old_manifest = load_manifest(old_ver)
-    new_manifest = load_manifest(new_ver)
+    """使用 SQLite 对比百万级对象索引，避免全量载入内存。"""
+    connection = sqlite3.connect(":memory:")
+    connection.execute("ATTACH DATABASE ? AS old", (str(manifest_path(old_ver)),))
+    connection.execute("ATTACH DATABASE ? AS new", (str(manifest_path(new_ver)),))
 
-    old_keys = set(old_manifest.keys())
-    new_keys = set(new_manifest.keys())
+    total_old = connection.execute("SELECT COUNT(*) FROM old.resources").fetchone()[0]
+    total_new = connection.execute("SELECT COUNT(*) FROM new.resources").fetchone()[0]
 
-    added = new_keys - old_keys
-    removed = old_keys - new_keys
-    common = old_keys & new_keys
-
-    modified = set()
-    for key in common:
-        old_hash = old_manifest[key].get("hash", "")
-        new_hash = new_manifest[key].get("hash", "")
-        if old_hash and new_hash and old_hash != new_hash:
-            modified.add(key)
-
-    # 按资源类型分组
-    def group_by_type(keys, manifest):
+    def group_by_type(query: str):
         groups = defaultdict(list)
-        for key in sorted(keys):
-            t = manifest[key].get("type", "Unknown")
-            groups[t].append(key)
+        for key, type_name in connection.execute(query):
+            groups[type_name or "Unknown"].append(key)
         return dict(groups)
+
+    added = group_by_type("""
+        SELECT n.resource_key, n.type
+        FROM new.resources n
+        LEFT JOIN old.resources o ON o.resource_key = n.resource_key
+        WHERE o.resource_key IS NULL
+        ORDER BY n.type, n.resource_key
+    """)
+    removed = group_by_type("""
+        SELECT o.resource_key, o.type
+        FROM old.resources o
+        LEFT JOIN new.resources n ON n.resource_key = o.resource_key
+        WHERE n.resource_key IS NULL
+        ORDER BY o.type, o.resource_key
+    """)
+    modified = group_by_type("""
+        SELECT n.resource_key, n.type
+        FROM new.resources n
+        INNER JOIN old.resources o ON o.resource_key = n.resource_key
+        WHERE n.hash <> o.hash
+        ORDER BY n.type, n.resource_key
+    """)
+    added_count = sum(map(len, added.values()))
+    removed_count = sum(map(len, removed.values()))
+    modified_count = sum(map(len, modified.values()))
+    unchanged = total_new - added_count - modified_count
+    connection.close()
 
     return {
         "old_version": old_ver,
         "new_version": new_ver,
         "summary": {
-            "total_old": len(old_keys),
-            "total_new": len(new_keys),
-            "added": len(added),
-            "removed": len(removed),
-            "modified": len(modified),
-            "unchanged": len(common) - len(modified),
+            "total_old": total_old,
+            "total_new": total_new,
+            "added": added_count,
+            "removed": removed_count,
+            "modified": modified_count,
+            "unchanged": unchanged,
         },
-        "added": group_by_type(added, new_manifest),
-        "removed": group_by_type(removed, old_manifest),
-        "modified": group_by_type(modified, new_manifest),
+        "added": added,
+        "removed": removed,
+        "modified": modified,
     }
 
 
@@ -126,9 +145,16 @@ def list_extracted_versions() -> list[str]:
         return []
     versions = []
     for d in extracted_dir.iterdir():
-        if d.is_dir() and (d / "manifest.json").exists():
+        report_path = d / "extraction_report.json"
+        if not d.is_dir() or not (d / "manifest.sqlite3").exists() or not report_path.exists():
+            continue
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if report.get("status") == "complete":
             versions.append(d.name)
-    return sorted(versions)
+    return sorted(versions, key=version_key)
 
 
 def main():
