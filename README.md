@@ -2,6 +2,8 @@
 
 自动检查 MementoMori Android 更新，下载并校验 APK/XAPK，完整保留包内文件和 Unity 对象，同时把可识别资源导出成可直接使用的格式。
 
+完整提取成功后还可以把 PNG 按内容哈希增量发布到阿里云 OSS，并通过短缓存的 `latest.json` 驱动 CDN 和其他项目自动更新。
+
 ## 能力范围
 
 完整提取分为两层：
@@ -58,6 +60,26 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows_task.ps1 -Unins
 ```
 
 单次运行、`--watch` 和计划任务共用单实例锁；已有更新进程运行时，后启动的实例会直接退出，避免同时写入同一版本。
+
+计划任务输出写入 `reports/scheduled-task.log`。
+
+## OSS 与 CDN 发布
+
+首次配置和阿里云控制台操作见 [docs/aliyun-oss-cdn.md](docs/aliyun-oss-cdn.md)。AccessKey 只从本地 `.env` 或 GitHub Actions Secrets 读取，不进入仓库。
+
+```bash
+# 交互式配置和连接测试
+python publish.py --configure
+python publish.py --check
+
+# 只验证发布清单
+python publish.py --version 4.18.0 --dry-run
+
+# 发布本地完整版本
+python run.py --version 4.18.0 --publish-only
+```
+
+当 `MMTM_OSS_ENABLED=true` 时，普通的 `python run.py` 会先检查 OSS 已发布版本；发现游戏更新后完成下载、完整解包和 diff，再自动增量发布图片。对象采用 SHA-256 文件名，版本清单上传成功后才会更新 `manifests/latest.json`。
 
 ## 其他命令
 

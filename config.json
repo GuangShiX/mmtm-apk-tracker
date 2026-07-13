@@ -10,6 +10,15 @@
         "email": "",
         "token": ""
     },
+    "oss": {
+        "enabled": false,
+        "endpoint": "https://oss-cn-beijing.aliyuncs.com",
+        "bucket": "",
+        "prefix": "mementomori",
+        "cdn_base_url": "",
+        "publish_after_extract": true,
+        "skip_if_published": false
+    },
     "dirs": {
         "apks": "apks",
         "extracted": "extracted",

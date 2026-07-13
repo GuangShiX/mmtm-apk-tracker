@@ -103,6 +103,17 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="持续模式检查间隔（秒），默认读取 config.json",
     )
+    publish_group = parser.add_mutually_exclusive_group()
+    publish_group.add_argument(
+        "--publish-only",
+        action="store_true",
+        help="只把本地完整解包版本发布到 OSS，不检查或下载游戏更新",
+    )
+    publish_group.add_argument(
+        "--skip-publish",
+        action="store_true",
+        help="本次只下载和解包，不发布到 OSS",
+    )
     return parser.parse_args()
 
 
@@ -154,19 +165,80 @@ def run_once(args: argparse.Namespace) -> int:
     print(f"已解包版本: {', '.join(extracted_versions) if extracted_versions else '无'}")
     print(f"本地完整包: {', '.join(local_versions) if local_versions else '无'}")
 
+    if args.publish_only:
+        publish_target = args.version or current_version
+        if not publish_target:
+            print("没有可发布的本地解包版本")
+            return 1
+        try:
+            from publish import load_oss_settings, publish_version
+
+            publish_version(
+                publish_target,
+                settings=load_oss_settings(),
+                force=args.force,
+            )
+            return 0
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"OSS 发布失败: {exc}")
+            return 1
+
     target_version = resolve_target_version(args.version)
     if not target_version:
         return 1
+
+    oss_settings = None
+    remote_published = None
+    oss_config = CONFIG.get("oss", {})
+    skip_if_published = str(
+        os.environ.get(
+            "MMTM_OSS_SKIP_IF_PUBLISHED",
+            oss_config.get("skip_if_published", False),
+        )
+    ).lower() in {"1", "true", "yes", "on"}
+    should_publish = (
+        not args.skip_publish
+        and bool(oss_config.get("publish_after_extract", True))
+    )
+    if should_publish:
+        from publish import get_remote_latest_version, load_oss_settings
+
+        oss_settings = load_oss_settings()
+        should_publish = oss_settings.enabled
+        if should_publish:
+            try:
+                remote_published = get_remote_latest_version(oss_settings)
+                print(f"OSS 已发布版本: {remote_published or '无'}")
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(f"检查 OSS 已发布版本失败，将继续本地流程: {exc}")
 
     if args.check_only:
         if current_version == target_version:
             print(f"当前已是最新版本: {current_version}")
         else:
             print(f"发现可更新版本: {current_version or '无'} -> {target_version}")
+        if should_publish and remote_published != target_version:
+            print(f"OSS 尚未发布目标版本: {target_version}")
+        return 0
+
+    if (
+        remote_published == target_version
+        and not args.force
+        and (current_version == target_version or skip_if_published)
+    ):
+        print(f"OSS 已发布远端最新版本，无需重复处理: {target_version}")
         return 0
 
     if current_version == target_version and not args.force:
         print(f"当前已是最新版本且已解包: {target_version}")
+        if should_publish:
+            try:
+                from publish import publish_version
+
+                publish_version(target_version, settings=oss_settings)
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(f"OSS 发布失败: {exc}")
+                return 1
         return 0
 
     apk_path = ensure_apk(target_version, source, args.skip_download)
@@ -185,6 +257,20 @@ def run_once(args: argparse.Namespace) -> int:
         run_diff(current_version, target_version)
     elif not current_version:
         print("\n首次解包，没有旧版本可对比")
+
+    if should_publish:
+        print(f"\n发布图片资源到 OSS: {target_version}")
+        try:
+            from publish import publish_version
+
+            publish_version(
+                target_version,
+                settings=oss_settings,
+                force=args.force,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"OSS 发布失败: {exc}")
+            return 1
 
     print("\n完成")
     return 0

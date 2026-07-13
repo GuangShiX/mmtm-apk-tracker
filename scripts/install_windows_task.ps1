@@ -14,12 +14,12 @@ if ($Uninstall) {
 }
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$python = (Get-Command python -ErrorAction Stop).Source
-$runScript = Join-Path $projectRoot "run.py"
+$scheduledScript = Join-Path $PSScriptRoot "run_scheduled.ps1"
+$powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
 
 $action = New-ScheduledTaskAction `
-    -Execute $python `
-    -Argument ('"{0}"' -f $runScript) `
+    -Execute $powershell `
+    -Argument ('-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $scheduledScript) `
     -WorkingDirectory $projectRoot
 
 $trigger = New-ScheduledTaskTrigger `
@@ -39,9 +39,10 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Checks for MementoMori APK updates and extracts all resources." `
+    -Description "Checks MementoMori updates, extracts resources, and publishes images to OSS." `
     -Force | Out-Null
 
 Write-Output "Installed scheduled task: $taskName"
 Write-Output "Project: $projectRoot"
 Write-Output "Interval: $IntervalMinutes minutes"
+Write-Output "Log: $(Join-Path $projectRoot 'reports\scheduled-task.log')"
