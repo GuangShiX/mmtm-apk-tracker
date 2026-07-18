@@ -19,6 +19,9 @@
         "publish_after_extract": true,
         "skip_if_published": false
     },
+    "github_fallback": {
+        "repository": "GuangShiX/mmtm-assets-fallback"
+    },
     "dirs": {
         "apks": "apks",
         "extracted": "extracted",

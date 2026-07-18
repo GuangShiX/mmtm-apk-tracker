@@ -1,5 +1,6 @@
 # .gitignore
 .env
+fallback_dist/
 bin/
 apks/
 extracted/

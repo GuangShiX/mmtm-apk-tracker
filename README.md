@@ -81,6 +81,17 @@ python run.py --version 4.18.0 --publish-only
 
 当 `MMTM_OSS_ENABLED=true` 时，普通的 `python run.py` 会先检查 OSS 已发布版本；发现游戏更新后完成下载、完整解包和 diff，再自动增量发布图片。对象采用 SHA-256 文件名，版本清单上传成功后才会更新 `manifests/latest.json`。
 
+## GitHub 关键图标备用源
+
+`fallback.py` 从完整清单中选择角色小头像、敌人、装备、符石、物品及公共边框，生成独立的低流量灾备仓库。当前公开备用源为 [GuangShiX/mmtm-assets-fallback](https://github.com/GuangShiX/mmtm-assets-fallback)，详细协议见 [docs/github-fallback.md](docs/github-fallback.md)。
+
+```bash
+python fallback.py --version 4.18.0 --output fallback_dist
+python fallback.py --latest-remote-version
+```
+
+备用清单使用游戏版本标签生成不可变 Raw URL，并为每个 PNG 提供 SHA-256。消费端应仅在 OSS/CDN 失败时访问 GitHub，校验后保存到本地缓存。
+
 ## 其他命令
 
 ```bash
