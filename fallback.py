@@ -229,29 +229,33 @@ def build_fallback_repository(
             f"关键图标总体积异常: {total_bytes} > {MAX_TOTAL_BYTES}"
         )
 
-    tag = f"v{version}"
-    raw_base = f"https://raw.githubusercontent.com/{repository}/{tag}"
+    archive_ref = f"v{version}"
+    raw_base = f"https://raw.githubusercontent.com/{repository}/main"
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "game": "MementoMori",
         "package_name": CONFIG["package_name"],
         "version": version,
-        "ref": tag,
+        "ref": "main",
+        "archive_ref": archive_ref,
         "generated_at": generated_at.isoformat(),
         "base_url": raw_base,
+        "cache_strategy": "stable-path-sha256",
         "asset_count": len(entries),
         "total_bytes": total_bytes,
         "category_counts": dict(sorted(category_counts.items())),
         "assets": entries,
     }
     latest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "game": "MementoMori",
         "version": version,
-        "ref": tag,
+        "ref": "main",
+        "archive_ref": archive_ref,
         "generated_at": generated_at.isoformat(),
         "manifest_url": f"{raw_base}/manifest.json",
         "base_url": raw_base,
+        "cache_strategy": "stable-path-sha256",
         "asset_count": len(entries),
         "total_bytes": total_bytes,
     }
@@ -291,7 +295,7 @@ def parse_args() -> argparse.Namespace:
         default=fallback_config.get(
             "repository", "GuangShiX/mmtm-assets-fallback"
         ),
-        help="GitHub owner/name，用于生成不可变 Raw URL",
+        help="GitHub owner/name，用于生成 main 分支稳定 Raw URL",
     )
     parser.add_argument(
         "--latest-remote-version",

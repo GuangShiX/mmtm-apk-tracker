@@ -2,7 +2,7 @@
 
 公开备用仓库：<https://github.com/GuangShiX/mmtm-assets-fallback>
 
-GitHub 备用源只保存 helper 需要的小型资源，不保存 APK、完整立绘、原始 Unity 对象、SQLite 清单或全部导出文件。它不是主 CDN，也不应承担正常页面的持续流量。
+GitHub 备用源只保存 helper 需要的小型资源，不保存 APK、完整立绘、原始 Unity 对象、SQLite 清单或全部导出文件。Cloudflare R2 是主源，GitHub 只在 R2 失败时使用。
 
 ## 当前范围
 
@@ -48,24 +48,24 @@ python fallback.py --version 4.18.0 `
 https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/main/latest.json
 ```
 
-`latest.json` 指向不可变游戏版本标签：
+`latest.json` 和图片都使用 `main` 分支固定路径：
 
 ```text
-manifest_url = https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/v4.18.0/manifest.json
-base_url     = https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/v4.18.0
+manifest_url = https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/main/manifest.json
+base_url     = https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/main
 asset URL    = {base_url}/{manifest.assets[n].path}
 ```
 
-不要直接使用 `main/assets/...`。版本标签保证同一 URL 的内容不会在后续更新中变化。
+游戏版本仍写入清单并保留 `v<游戏版本>` Git 标签用于回滚，但不进入图片 URL。消费端通过每条资源的 SHA-256 判断本地缓存是否需要更新，不通过版本目录切换地址。
 
 ## helper 回退顺序
 
 推荐服务端统一执行：
 
 1. 命中 helper 本地磁盘缓存时直接返回。
-2. 未命中时请求主 OSS/CDN。
-3. 主源超时、网络失败或返回非 2xx 时读取 GitHub `latest.json`。
-4. 下载标签清单，按分类和文件名寻找资源。
+2. 未命中时请求主 Cloudflare R2。
+3. 主源超时、网络失败或返回非 2xx 时读取 GitHub `manifest.json`。
+4. 按分类和文件名寻找资源。
 5. 下载 PNG，核对大小与 SHA-256 后写入本地缓存。
 6. GitHub 也失败时返回内置占位图，不让页面请求持续重试。
 
@@ -75,10 +75,11 @@ asset URL    = {base_url}/{manifest.assets[n].path}
 
 备用仓库自己的 GitHub Actions 每 6 小时检查 APKPure：
 
-1. 当前游戏版本与 `manifest.json` 相同则立即结束。
+1. 当前游戏版本与 `manifest.json` 相同则跳过解包。
 2. 发现新版本后运行 tracker 的完整下载和解包流程。
 3. 重建关键集合并提交。
-4. 创建 `v<游戏版本>` 不可变标签。
+4. 创建 `v<游戏版本>` 回滚标签。
+5. R2 变量已配置时，把当前集合增量同步到固定对象路径。
 
 完整解包可能超过 GitHub 托管 Runner 的磁盘或时间限制。需要时给备用仓库设置 `ASSET_RUNNER` Repository Variable，指向有足够磁盘的 Windows 自托管 Runner。
 

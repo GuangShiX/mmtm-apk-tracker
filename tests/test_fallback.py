@@ -74,7 +74,7 @@ def create_version(root: Path, version="1.2.3") -> Path:
 
 
 class FallbackRepositoryTests(unittest.TestCase):
-    def test_builds_small_canonical_repository_with_immutable_urls(self):
+    def test_builds_small_canonical_repository_with_stable_urls(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             version_dir = create_version(root)
@@ -88,10 +88,11 @@ class FallbackRepositoryTests(unittest.TestCase):
             )
 
             self.assertEqual(manifest["asset_count"], 23)
-            self.assertEqual(manifest["ref"], "v1.2.3")
+            self.assertEqual(manifest["ref"], "main")
+            self.assertEqual(manifest["archive_ref"], "v1.2.3")
             self.assertEqual(
                 manifest["base_url"],
-                "https://raw.githubusercontent.com/owner/icons/v1.2.3",
+                "https://raw.githubusercontent.com/owner/icons/main",
             )
             self.assertEqual(
                 (output / "assets/characters/CHR_000001_00_s.png").read_bytes(),
@@ -99,7 +100,7 @@ class FallbackRepositoryTests(unittest.TestCase):
             )
             self.assertTrue((output / "assets" / GENERATED_MARKER).is_file())
             latest = json.loads((output / "latest.json").read_text(encoding="utf-8"))
-            self.assertTrue(latest["manifest_url"].endswith("/v1.2.3/manifest.json"))
+            self.assertTrue(latest["manifest_url"].endswith("/main/manifest.json"))
 
     def test_rebuild_removes_stale_generated_assets(self):
         with tempfile.TemporaryDirectory() as temp:

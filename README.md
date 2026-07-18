@@ -63,7 +63,25 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows_task.ps1 -Unins
 
 计划任务输出写入 `reports/scheduled-task.log`。
 
-## OSS 与 CDN 发布
+## Cloudflare R2 主源
+
+关键图标使用固定路径发布到 Cloudflare R2，不把游戏版本写入图片 URL。完整配置步骤见 [docs/cloudflare-r2.md](docs/cloudflare-r2.md)。
+
+```bash
+# 生成关键图标集合
+python fallback.py --version 4.18.0 --output fallback_dist
+
+# 只校验待发布文件，不连接 R2
+python publish_r2.py --source fallback_dist --dry-run
+
+# 配置 .env 后检查连接并发布
+python publish_r2.py --check
+python publish_r2.py --source fallback_dist
+```
+
+发布器读取远端 `manifest.json`，只上传新增或 SHA-256 变化的文件。旧对象默认保留；图片上传完成后才更新 `manifest.json` 和 `latest.json`。同名文件极少变化时，消费端使用清单哈希重新下载并校验。
+
+## 可选 OSS 发布
 
 首次配置和阿里云控制台操作见 [docs/aliyun-oss-cdn.md](docs/aliyun-oss-cdn.md)。AccessKey 只从本地 `.env` 或 GitHub Actions Secrets 读取，不进入仓库。
 
@@ -90,7 +108,7 @@ python fallback.py --version 4.18.0 --output fallback_dist
 python fallback.py --latest-remote-version
 ```
 
-备用清单使用游戏版本标签生成不可变 Raw URL，并为每个 PNG 提供 SHA-256。消费端应仅在 OSS/CDN 失败时访问 GitHub，校验后保存到本地缓存。
+备用清单使用 `main` 分支固定路径，并为每个 PNG 提供 SHA-256。版本标签只用于人工回滚，不进入消费 URL。消费端应仅在 R2 失败时访问 GitHub，校验后保存到本地缓存。
 
 ## 其他命令
 
