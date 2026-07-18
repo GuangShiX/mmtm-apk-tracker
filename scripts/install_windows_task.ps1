@@ -39,7 +39,7 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Checks MementoMori updates, extracts resources, and publishes images to OSS." `
+    -Description "Checks MementoMori updates, extracts resources, and generates version diffs." `
     -Force | Out-Null
 
 Write-Output "Installed scheduled task: $taskName"

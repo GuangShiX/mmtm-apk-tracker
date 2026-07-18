@@ -10,6 +10,8 @@ MementoMori APK Tracker must automatically detect game updates, download and val
 - `download.py`: apkeep integration, retries, ZIP directory and CRC validation.
 - `extract.py`: complete archive expansion, raw object preservation, decoded exports, Prefab derivation, and coverage report.
 - `diff.py`: SQLite manifest comparison.
+- `asset_cdn.py`: official app/asset version discovery and Addressables catalog resolution.
+- `fallback.py`: lightweight critical-image extraction and GitHub repository auto-update.
 - `config.json`: update interval, retry, verification, and directory settings.
 - `scripts/install_windows_task.ps1`: recurring Windows scheduled task installer.
 - `tests/`: standard-library regression tests.
@@ -36,6 +38,8 @@ python run.py
 python run.py --watch
 python run.py --check-only
 python run.py --version 4.18.0 --force
+python fallback.py --remote-info
+python fallback.py --auto-update --output fallback_dist
 python -m unittest discover -s tests -v
 ```
 

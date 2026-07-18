@@ -10,24 +10,8 @@
         "email": "",
         "token": ""
     },
-    "oss": {
-        "enabled": false,
-        "endpoint": "https://oss-cn-beijing.aliyuncs.com",
-        "bucket": "",
-        "prefix": "mementomori",
-        "cdn_base_url": "",
-        "publish_after_extract": true,
-        "skip_if_published": false
-    },
     "github_fallback": {
         "repository": "GuangShiX/mmtm-assets-fallback"
-    },
-    "r2": {
-        "enabled": false,
-        "account_id": "",
-        "bucket": "",
-        "prefix": "mementomori",
-        "public_base_url": ""
     },
     "dirs": {
         "apks": "apks",

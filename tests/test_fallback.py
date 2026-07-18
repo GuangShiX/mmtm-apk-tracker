@@ -87,7 +87,7 @@ class FallbackRepositoryTests(unittest.TestCase):
                 generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             )
 
-            self.assertEqual(manifest["asset_count"], 23)
+            self.assertEqual(manifest["asset_count"], 26)
             self.assertEqual(manifest["ref"], "main")
             self.assertEqual(manifest["archive_ref"], "v1.2.3")
             self.assertEqual(

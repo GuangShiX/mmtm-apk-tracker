@@ -2,7 +2,7 @@
 
 自动检查 MementoMori Android 更新，下载并校验 APK/XAPK，完整保留包内文件和 Unity 对象，同时把可识别资源导出成可直接使用的格式。
 
-完整提取成功后还可以把 PNG 按内容哈希增量发布到阿里云 OSS，并通过短缓存的 `latest.json` 驱动 CDN 和其他项目自动更新。
+关键小图标另有轻量自动更新流程：同时检查官方应用版本和 Addressables 资源版本，只下载发生变化的 Bundle，并提交到独立 GitHub 图片仓库。
 
 ## 能力范围
 
@@ -63,52 +63,35 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows_task.ps1 -Unins
 
 计划任务输出写入 `reports/scheduled-task.log`。
 
-## Cloudflare R2 主源
+## GitHub 图片自动更新
 
-关键图标使用固定路径发布到 Cloudflare R2，不把游戏版本写入图片 URL。完整配置步骤见 [docs/cloudflare-r2.md](docs/cloudflare-r2.md)。
+公开图片仓库：[GuangShiX/mmtm-assets-fallback](https://github.com/GuangShiX/mmtm-assets-fallback)。它保存角色小头像、敌人、装备、符石、物品以及头像合成所需的公共边框，详细协议见 [docs/github-fallback.md](docs/github-fallback.md)。
 
 ```bash
-# 生成关键图标集合
+# 查看官方应用版本、资源版本和 Master 版本
+python fallback.py --remote-info
+
+# 自动处理基础 APK 更新和同版本资源热更新
+python fallback.py --auto-update --output fallback_dist
+
+# 只合并官方 Addressables 热更新图片
+python fallback.py --sync-hot-update --output fallback_dist
+
+# 从已有 APK/XAPK 轻量生成基础图片集，不创建完整解包目录
+python fallback.py --from-package --version 4.18.0 --apk apks/game.xapk --output fallback_dist
+
+# 仍可从本机 complete 完整解包结果重建
 python fallback.py --version 4.18.0 --output fallback_dist
-
-# 只校验待发布文件，不连接 R2
-python publish_r2.py --source fallback_dist --dry-run
-
-# 配置 .env 后检查连接并发布
-python publish_r2.py --check
-python publish_r2.py --source fallback_dist
 ```
 
-发布器读取远端 `manifest.json`，只上传新增或 SHA-256 变化的文件。旧对象默认保留；图片上传完成后才更新 `manifest.json` 和 `latest.json`。同名文件极少变化时，消费端使用清单哈希重新下载并校验。
+自动流程使用两个更新键：
 
-## 可选 OSS 发布
+1. `appVersion` 变化时下载一次官方 APK，扫描全部 Bundle 但只导出关键图片。
+2. `assetVersion` 变化时解析官方 Addressables catalog，只下载新增或内容哈希变化的关键图片 Bundle。
 
-首次配置和阿里云控制台操作见 [docs/aliyun-oss-cdn.md](docs/aliyun-oss-cdn.md)。AccessKey 只从本地 `.env` 或 GitHub Actions Secrets 读取，不进入仓库。
+这能覆盖“不更新 APK、只通过游戏资源热更新发布新角色”的情况。图片 URL 始终使用 `main/assets/...` 固定路径，不带游戏版本；`manifest.json` 为每张 PNG 提供 SHA-256，消费端下载后应校验并保存到本地缓存。
 
-```bash
-# 交互式配置和连接测试
-python publish.py --configure
-python publish.py --check
-
-# 只验证发布清单
-python publish.py --version 4.18.0 --dry-run
-
-# 发布本地完整版本
-python run.py --version 4.18.0 --publish-only
-```
-
-当 `MMTM_OSS_ENABLED=true` 时，普通的 `python run.py` 会先检查 OSS 已发布版本；发现游戏更新后完成下载、完整解包和 diff，再自动增量发布图片。对象采用 SHA-256 文件名，版本清单上传成功后才会更新 `manifests/latest.json`。
-
-## GitHub 关键图标备用源
-
-`fallback.py` 从完整清单中选择角色小头像、敌人、装备、符石、物品及公共边框，生成独立的低流量灾备仓库。当前公开备用源为 [GuangShiX/mmtm-assets-fallback](https://github.com/GuangShiX/mmtm-assets-fallback)，详细协议见 [docs/github-fallback.md](docs/github-fallback.md)。
-
-```bash
-python fallback.py --version 4.18.0 --output fallback_dist
-python fallback.py --latest-remote-version
-```
-
-备用清单使用 `main` 分支固定路径，并为每个 PNG 提供 SHA-256。版本标签只用于人工回滚，不进入消费 URL。消费端应仅在 R2 失败时访问 GitHub，校验后保存到本地缓存。
+helper 侧的实现边界和新 session 提示词见 [docs/helper-image-cache-handoff.md](docs/helper-image-cache-handoff.md)。
 
 ## 其他命令
 
