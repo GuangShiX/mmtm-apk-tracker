@@ -1,0 +1,324 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from PIL import Image
+
+from skill_card import (
+    CardAssets,
+    COMPACT_AVATAR_SIZE,
+    COMPACT_HEIGHT,
+    COMPACT_ICON_SIZE,
+    COMPACT_TEMPLATE_VERSION,
+    COMPACT_WIDTH,
+    FontSet,
+    _compact_skill_text,
+    _card_manifest_key,
+    _level_label,
+    _minify_compact_text,
+    _resolve_character_jsons,
+    _sha256,
+    _update_card_manifest,
+    render_skill_card,
+    verify_latest_skill_cards,
+)
+
+
+def _skill(skill_id, kind, name):
+    return {
+        "id": skill_id,
+        "kind": kind,
+        "names": {"zh-CN": name},
+        "max_cooldown": 4 if kind == "active" else None,
+        "levels": [
+            {
+                "order": 1,
+                "character_level": 1,
+                "equipment_rarity_flags": 0,
+                "descriptions": {"zh-CN": "造成攻击力百分比的伤害。"},
+                "source_memo_ja": {"label": "Lv1", "text": "source"},
+            },
+            {
+                "order": 2,
+                "character_level": 240,
+                "equipment_rarity_flags": 128,
+                "descriptions": {"zh-CN": "强化技能效果。"},
+                "source_memo_ja": {"label": "Ex1", "text": "source ex"},
+            },
+        ],
+    }
+
+
+class SkillCardTests(unittest.TestCase):
+    def test_equipment_rarity_uses_ex_label(self):
+        self.assertEqual(
+            _level_label({"order": 4, "equipment_rarity_flags": 128}), "Ex1"
+        )
+        self.assertEqual(
+            _level_label({"order": 3, "equipment_rarity_flags": 0}), "Lv3"
+        )
+
+    def test_latest_resolves_every_character_at_same_release_time(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            skills = Path(temporary)
+            characters = skills / "characters"
+            characters.mkdir()
+            for character_id in (7, 3):
+                (characters / f"{character_id:06d}.json").write_text(
+                    "{}", encoding="utf-8"
+                )
+            (skills / "latest.json").write_text(
+                json.dumps({"latest_characters": [{"id": 7}, {"id": 3}]}),
+                encoding="utf-8",
+            )
+
+            paths = _resolve_character_jsons(skills, None, True, False)
+
+            self.assertEqual(
+                [path.name for path in paths], ["000007.json", "000003.json"]
+            )
+
+    def test_compact_text_merges_all_numeric_upgrades_and_removes_dialogue(self):
+        skill = {
+            "levels": [
+                {
+                    "descriptions": {
+                        "zh-CN": "“一起赢下这场战斗！”佛罗伦斯使生命值百分比最低的友军恢复佛罗伦斯攻击力×5%的生命值。“这就是我的觉悟！”再随机对敌人进行2次攻击，每次造成攻击力×520%的物理伤害。第7回合起，发动此技能不会恢复生命值，造成的物理伤害提升为攻击力×1040%。"
+                    }
+                },
+                {
+                    "descriptions": {
+                        "zh-CN": "生命值恢复量提升为佛罗伦斯攻击力×15%。"
+                    }
+                },
+                {
+                    "descriptions": {
+                        "zh-CN": "造成的物理伤害提升为攻击力×890%。第7回合起，造成的物理伤害提升为攻击力×1780%。"
+                    }
+                },
+                {
+                    "descriptions": {
+                        "zh-CN": "强化闪光瞬辉斩，攻击次数增加为3次。"
+                    }
+                },
+                {
+                    "descriptions": {
+                        "zh-CN": "强化闪光瞬辉斩，造成的物理伤害提升为攻击力×980%。第7回合起，造成的物理伤害提升为攻击力×1960%。"
+                    }
+                },
+            ]
+        }
+
+        self.assertEqual(
+            _compact_skill_text(skill, "zh-CN"),
+            "佛罗伦斯使生命值百分比最低的友军恢复佛罗伦斯攻击力×15%的生命值。"
+            "再随机对敌人进行3次攻击，每次造成攻击力×980%的物理伤害。"
+            "第7回合起，发动此技能不会恢复生命值，造成的物理伤害提升为攻击力×1960%。",
+        )
+
+    def test_compact_text_minifies_common_master_phrases(self):
+        source = (
+            "战斗开始时，佛罗伦斯强化自己的普通攻击，并额外减少40%自身承受伤害，"
+            "使自己增加100%最大生命值（无法被解除），效果持续10回合。"
+            "当生命值恢复目标原本的生命值为50%以上，且身上附带控制效果时，"
+            "额外解除目标身上的所有控制效果。"
+        )
+
+        self.assertEqual(
+            _minify_compact_text(source),
+            "战斗开始时，强化普通攻击，承受伤害-40%、最大生命值+100%（无法解除），持续10回合。"
+            "若恢复前目标生命值≥50%且附带控制效果，解除其所有控制效果。",
+        )
+
+    def test_compact_renderer_waits_for_complete_official_localization(self):
+        payload = {
+            "character": {"id": 42},
+            "localization_complete": False,
+        }
+        assets = CardAssets(
+            art=Path("missing.png"),
+            icons={},
+            asset_version="asset",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "官方 zh-CN 技能文本尚未完整"):
+            render_skill_card(
+                payload,
+                assets,
+                Path("unused.png"),
+                mode="compact",
+            )
+
+    def test_renderer_accepts_master_json_without_character_specific_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            art = root / "art.png"
+            icon1 = root / "icon1.png"
+            icon2 = root / "icon2.png"
+            Image.new("RGB", (1024, 1024), (220, 150, 80)).save(art)
+            Image.new("RGBA", (100, 100), (150, 90, 40, 255)).save(icon1)
+            Image.new("RGBA", (100, 100), (50, 90, 130, 255)).save(icon2)
+            payload = {
+                "character": {
+                    "id": 42,
+                    "memo": "fixture",
+                    "names": {"zh-CN": "测试角色"},
+                    "subtitles": {"zh-CN": "测试称号"},
+                    "element_type": 3,
+                    "job_flags": 1,
+                },
+                "active_skills": [_skill(42001, "active", "主动测试")],
+                "passive_skills": [_skill(42002, "passive", "被动测试")],
+                "localization_complete": True,
+                "source": {"master_version": "1"},
+            }
+            assets = CardAssets(
+                art=art,
+                icons={42001: icon1, 42002: icon2},
+                asset_version="asset",
+            )
+            output = root / "card.png"
+            with patch(
+                "skill_card._font_candidates",
+                return_value=FontSet(
+                    Path(r"C:\Windows\Fonts\arial.ttf"),
+                    Path(r"C:\Windows\Fonts\arialbd.ttf"),
+                    Path(r"C:\Windows\Fonts\times.ttf"),
+                ),
+            ):
+                render_skill_card(payload, assets, output)
+
+            with Image.open(output) as rendered:
+                self.assertEqual(rendered.size, (3840, 2160))
+
+    def test_compact_renderer_uses_portrait_canvas_and_larger_avatar_tier(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            art = root / "art.png"
+            icon = root / "icon.png"
+            Image.new("RGB", (1024, 1024), (220, 150, 80)).save(art)
+            Image.new("RGBA", (100, 100), (150, 90, 40, 255)).save(icon)
+            payload = {
+                "character": {
+                    "id": 42,
+                    "names": {"zh-CN": "测试角色"},
+                    "subtitles": {"zh-CN": "测试称号"},
+                },
+                "active_skills": [
+                    _skill(42001, "active", "主动一"),
+                    _skill(42002, "active", "主动二"),
+                ],
+                "passive_skills": [
+                    _skill(42003, "passive", "被动一"),
+                    _skill(42004, "passive", "被动二"),
+                ],
+                "exclusive_weapon": {
+                    "names": {"zh-CN": "测试专武"},
+                    "passive_effects": [
+                        {"parameter_code": "Muscle", "value_text": "+8%"},
+                        {"parameter_code": "AttackPower", "value_text": "+18%"},
+                        {"parameter_code": "Critical", "value_text": "+10%"},
+                    ],
+                    "skill_effects": [
+                        {"descriptions": {"zh-CN": "强化主动一。"}},
+                        {"descriptions": {"zh-CN": "强化被动一。"}},
+                        {
+                            "descriptions": {
+                                "zh-CN": "强化主动一，造成的物理伤害提升为攻击力×980%。"
+                                "第7回合起，造成的物理伤害提升为攻击力×1960%。"
+                            }
+                        },
+                    ],
+                },
+                "arcanas": [
+                    {
+                        "id": 9,
+                        "names": {"zh-CN": "测试秘仪"},
+                        "levels": [
+                            {
+                                "character_rarity_flags": 512,
+                                "effects": [
+                                    {
+                                        "parameter_code": "AttackPower",
+                                        "value_text": "+2%",
+                                    }
+                                ],
+                            }
+                        ],
+                        "required_characters": [
+                            {"id": 42, "names": {"zh-CN": "测试角色"}},
+                            {"id": 0, "names": {"zh-CN": None}},
+                        ],
+                    }
+                ],
+            }
+            assets = CardAssets(
+                art=art,
+                avatar=icon,
+                weapon=icon,
+                icons={skill_id: icon for skill_id in (42001, 42002, 42003, 42004)},
+                arcana_characters={42: icon},
+                asset_version="asset",
+            )
+            skills_dir = root / "skills"
+            characters_dir = skills_dir / "characters"
+            characters_dir.mkdir(parents=True)
+            source = characters_dir / "000042.json"
+            source.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (skills_dir / "latest.json").write_text(
+                json.dumps({"latest_characters": [{"id": 42}]}),
+                encoding="utf-8",
+            )
+            output_dir = root / "cards" / "characters"
+            output = output_dir / "character-000042-compact-zh-CN.png"
+            with patch(
+                "skill_card._font_candidates",
+                return_value=FontSet(
+                    Path(r"C:\Windows\Fonts\arial.ttf"),
+                    Path(r"C:\Windows\Fonts\arialbd.ttf"),
+                    Path(r"C:\Windows\Fonts\times.ttf"),
+                ),
+            ):
+                render_skill_card(payload, assets, output, mode="compact")
+
+            with Image.open(output) as rendered:
+                self.assertEqual(rendered.size, (COMPACT_WIDTH, COMPACT_HEIGHT))
+            self.assertGreater(COMPACT_AVATAR_SIZE, COMPACT_ICON_SIZE)
+            _update_card_manifest(
+                root / "cards" / "manifest.json",
+                [
+                    {
+                        "key": _card_manifest_key(42, "zh-CN", "compact"),
+                        "character_id": 42,
+                        "language": "zh-CN",
+                        "mode": "compact",
+                        "path": "characters/character-000042-compact-zh-CN.png",
+                        "source_sha256": _sha256(source),
+                        "template_version": COMPACT_TEMPLATE_VERSION,
+                        "asset_version": "asset",
+                        "width": COMPACT_WIDTH,
+                        "height": COMPACT_HEIGHT,
+                        "sha256": _sha256(output),
+                    }
+                ],
+            )
+            self.assertEqual(
+                verify_latest_skill_cards(skills_dir, output_dir),
+                [output],
+            )
+            payload["character"]["names"]["zh-CN"] = "已更新角色"
+            source.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "已过期"):
+                verify_latest_skill_cards(skills_dir, output_dir)
+
+
+if __name__ == "__main__":
+    unittest.main()

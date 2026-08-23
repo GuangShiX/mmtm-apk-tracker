@@ -33,11 +33,21 @@ class OfficialAssetInfo:
     asset_version: str
     master_version: str
     asset_uri_format: str
+    master_uri_format: str = ""
 
     def asset_url(self, relative_path: str) -> str:
         if "{0}" not in self.asset_uri_format:
             raise RuntimeError("官方资源 URL 格式缺少 {0} 占位符")
         return self.asset_uri_format.replace("{0}", relative_path)
+
+    def master_url(self, master_book_name: str) -> str:
+        if "{0}" not in self.master_uri_format or "{1}" not in self.master_uri_format:
+            raise RuntimeError("官方 Master URL 格式缺少 {0}/{1} 占位符")
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", master_book_name):
+            raise RuntimeError(f"非法 MasterBook 名称: {master_book_name}")
+        return self.master_uri_format.replace(
+            "{0}", self.master_version
+        ).replace("{1}", master_book_name)
 
     @property
     def catalog_url(self) -> str:
@@ -122,6 +132,7 @@ def get_official_asset_info(app_version: str | None = None) -> OfficialAssetInfo
     asset_version = response.headers.get("ortegaassetversion", "")
     master_version = response.headers.get("ortegamasterversion", "")
     asset_uri_format = data.get("AssetCatalogFixedUriFormat", "")
+    master_uri_format = data.get("MasterUriFormat", "")
     reported_version = data.get("AppAssetVersionInfo", {}).get("Version", "")
     if reported_version and reported_version != app_version:
         raise RuntimeError(
@@ -134,6 +145,7 @@ def get_official_asset_info(app_version: str | None = None) -> OfficialAssetInfo
         asset_version=asset_version,
         master_version=master_version,
         asset_uri_format=asset_uri_format,
+        master_uri_format=master_uri_format,
     )
 
 
@@ -146,29 +158,66 @@ def download_file(
 ) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".tmp")
-    temporary.unlink(missing_ok=True)
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
+        resume_from = temporary.stat().st_size if temporary.is_file() else 0
+        request_headers = dict(headers or ASSET_HEADERS)
+        if resume_from:
+            request_headers["range"] = f"bytes={resume_from}-"
         try:
             with requests.get(
                 url,
-                headers=headers or ASSET_HEADERS,
+                headers=request_headers,
                 stream=True,
                 timeout=REQUEST_TIMEOUT_SECONDS,
             ) as response:
+                if response.status_code == 416:
+                    match = re.fullmatch(
+                        r"bytes \*/(\d+)",
+                        response.headers.get("content-range", ""),
+                    )
+                    expected = int(match.group(1)) if match else 0
+                    if expected and resume_from == expected:
+                        temporary.replace(target)
+                        return target
+                    if expected and resume_from > expected:
+                        temporary.unlink(missing_ok=True)
+                    response.raise_for_status()
                 response.raise_for_status()
-                expected = int(response.headers.get("content-length", 0))
+                content_length = int(response.headers.get("content-length", 0))
+                mode = "wb"
                 size = 0
-                next_progress = 100 * 1024 * 1024
-                with temporary.open("wb") as output:
+                expected = content_length
+                if resume_from and response.status_code == 206:
+                    match = re.fullmatch(
+                        r"bytes (\d+)-(\d+)/(\d+|\*)",
+                        response.headers.get("content-range", ""),
+                    )
+                    if not match or int(match.group(1)) != resume_from:
+                        raise RuntimeError(
+                            f"断点响应无效: {target.name}: "
+                            f"{response.headers.get('content-range', '')}"
+                        )
+                    mode = "ab"
+                    size = resume_from
+                    if match.group(3) != "*":
+                        expected = int(match.group(3))
+                    elif content_length:
+                        expected = resume_from + content_length
+                progress_step = 100 * 1024 * 1024
+                next_progress = ((size // progress_step) + 1) * progress_step
+                with temporary.open(mode) as output:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             output.write(chunk)
                             size += len(chunk)
                             if size >= next_progress:
                                 total = f"/{expected}" if expected else ""
-                                print(f"  下载进度: {size}{total} bytes")
-                                next_progress += 100 * 1024 * 1024
+                                print(
+                                    f"  下载进度: {size}{total} bytes",
+                                    flush=True,
+                                )
+                                next_progress += progress_step
                 if expected and size != expected:
                     raise RuntimeError(
                         f"下载长度不一致: {target.name}: {size}/{expected}"
@@ -177,8 +226,13 @@ def download_file(
             return target
         except (OSError, requests.RequestException, RuntimeError) as exc:
             last_error = exc
-            temporary.unlink(missing_ok=True)
             if attempt < retries:
+                retained = temporary.stat().st_size if temporary.is_file() else 0
+                print(
+                    f"  下载重试: {attempt + 1}/{retries}, "
+                    f"保留 {retained} bytes",
+                    flush=True,
+                )
                 time.sleep(attempt * 2)
     raise RuntimeError(f"下载失败: {url}: {last_error}") from last_error
 
@@ -361,6 +415,46 @@ def resolve_critical_catalog_targets(
             bundle_names=tuple(sorted(bundle_names)),
         )
     return targets
+
+
+def resolve_catalog_key_bundles(
+    catalog: dict[str, Any], requested_keys: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Resolve exact Addressables keys to their asset and dependency bundles."""
+    requested = set(requested_keys)
+    if not requested:
+        return {}
+    keys, key_by_offset = _decode_catalog_keys(catalog.get("m_KeyDataString", ""))
+    buckets, bucket_by_key = _decode_catalog_buckets(
+        catalog.get("m_BucketDataString", ""), key_by_offset
+    )
+    entries = _decode_catalog_entries(catalog)
+    available = set(keys)
+    missing = sorted(requested - available)
+    if missing:
+        raise RuntimeError(f"catalog 缺少 Addressables key: {', '.join(missing)}")
+
+    result: dict[str, tuple[str, ...]] = {}
+    for key in sorted(requested):
+        bundle_names: set[str] = set()
+        for asset_entry_index in bucket_by_key.get(key, []):
+            if not 0 <= asset_entry_index < len(entries):
+                continue
+            asset_entry = entries[asset_entry_index]
+            if asset_entry.bundle_name:
+                bundle_names.add(asset_entry.bundle_name)
+            dependency_index = asset_entry.dependencies_bucket_index
+            if not 0 <= dependency_index < len(buckets):
+                continue
+            for entry_index in buckets[dependency_index]:
+                if 0 <= entry_index < len(entries):
+                    bundle_name = entries[entry_index].bundle_name
+                    if bundle_name:
+                        bundle_names.add(bundle_name)
+        if not bundle_names:
+            raise RuntimeError(f"catalog key 没有对应 Bundle: {key}")
+        result[key] = tuple(sorted(bundle_names))
+    return result
 
 
 def load_catalog(path: Path) -> dict[str, Any]:

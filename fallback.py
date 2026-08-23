@@ -45,7 +45,7 @@ MAX_ASSET_COUNT = 3000
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_TOTAL_BYTES = 100 * 1024 * 1024
 
-UI_ASSET_NAMES = {
+CORE_UI_ASSET_NAMES = {
     "Background_Default.png",
     "frame_common_lr_slice.png",
     "frame_common_slice.png",
@@ -68,6 +68,73 @@ UI_ASSET_NAMES = {
     "plate_character.png",
     "tab_bg.png",
 }
+
+# Visual dependencies referenced by CharacterMenuViewController in the 4.18.0
+# Prefab evidence. Keep these explicit so the lightweight package/catalog scan
+# exports the same page chrome as the complete extraction pipeline.
+# Source SHA-256: a8029100b538090281a277c39351d501ff481478f04b2244414d4e4b4b3b67b6
+CHARACTER_MENU_UI_ASSET_NAMES = {
+    "arrow_s_03.png",
+    "base_badge.png",
+    "base_empty_01.png",
+    "base_filter_01.png",
+    "base_filter_02.png",
+    "base_headline_01.png",
+    "base_l_01.png",
+    "base_number_02.png",
+    "base_number_05.png",
+    "base_number_06.png",
+    "base_number_07.png",
+    "base_s_03.png",
+    "base_scenario.png",
+    "base_square_02.png",
+    "base_square_03.png",
+    "base_square_04.png",
+    "base_white.png",
+    "button_l_01.png",
+    "button_l_01_white.png",
+    "button_m_02.png",
+    "button_plus_01.png",
+    "button_s_01.png",
+    "decoration_border_02.png",
+    "decoration_brush_02.png",
+    "equipment_synchro_cell_base.png",
+    "equipment_synchro_chain.png",
+    "frame_decoration_rplus.png",
+    "gradation_01.png",
+    "gradation_02.png",
+    "icon_battle_power_01.png",
+    "icon_check_03.png",
+    "icon_element_1.png",
+    "icon_element_2.png",
+    "icon_element_3.png",
+    "icon_element_4.png",
+    "icon_element_5.png",
+    "icon_element_6.png",
+    "icon_fragment.png",
+    "icon_guest.png",
+    "icon_job_warrior.png",
+    "icon_lock.png",
+    "icon_lock_equipment.png",
+    "icon_monologue.png",
+    "icon_playericon.png",
+    "icon_plus.png",
+    "icon_rarity_plus_star_1.png",
+    "icon_sort.png",
+    "image_levellink.png",
+    "plate_character.png",
+    "plate_character_white_slice.png",
+    "scrollbar_background_02.png",
+    "scrollbar_foreground.png",
+    "sliderbar_foreground.png",
+    "toggle_01_off.png",
+    "toggle_all_off.png",
+    "toggle_all_on.png",
+    "toggle_attribute_off.png",
+    "toggle_attribute_on.png",
+}
+
+UI_ASSET_NAMES = CORE_UI_ASSET_NAMES | CHARACTER_MENU_UI_ASSET_NAMES
 UI_ASSET_NAMES_BY_CASE = {name.casefold(): name for name in UI_ASSET_NAMES}
 
 

@@ -1,55 +1,88 @@
-# Helper 图片缓存改造交接提示词
+# Helper 游戏美术统一资产链路优化提示词
 
-将下面内容作为新 session 的首条提示词：
+将下面内容作为 `D:\NewProjects\memento\mementomori-helper-master` 新 session 的首条提示词：
 
 ```text
-请改造 D:\NewProjects\memento\mementomori-helper-master 的图片资源读取流程。
+请在 D:\NewProjects\memento\mementomori-helper-master 中完成“所有游戏美术资源统一走本地优先资产链路”的审计和优化。
+
+开始前必须完整阅读：
+- AGENTS.md
+- docs/ai/rules-inventory.md 的 Game Icon System 规则
+- docs/游戏图标系统.md
+- MementoMori.WebUI/Services/GitHubImageAssetService.cs
+- CharacterIconService、EquipmentIconService、SphereIconService、GameIconRenderService
+- MementoMori.Tests/GitHubImageAssetServiceAssertions.cs
+
+当前工作树可能已有大量其它任务改动。先检查 git status 和相关文件 diff，不得覆盖、回退、暂存或顺手整理其它任务的修改。此次工作不需要启动 5700/5701，不发送游戏请求，不触碰账号或运行时数据；使用隔离输出完成源码测试和构建即可。
 
 职责边界：
-- 不要在 helper 中实现游戏版本检测、APK 下载、Unity 解包或 GitHub 发布。
-- 这些工作由 D:\NewProjects\mmtm-apk-tracker 和公开仓库
-  https://github.com/GuangShiX/mmtm-assets-fallback 负责。
-- helper 只在实际需要某张图片时下载一次，校验后保存到本地；以后优先使用本地文件。
-- 大型且基本不变化、已经随 helper 发布的图片继续保存在 helper 仓库，不迁移到远端。
+- mmtm-apk-tracker 负责官方 appVersion/assetVersion 发现、APK/Addressables 提取模式、允许清单与发布校验。
+- GuangShiX/mmtm-assets-fallback 由 CI 发布规范 PNG、manifest.json、latest.json 和版本标签。
+- helper 只是只读消费者：按需下载、严格校验、持久缓存和本地渲染。不得在 helper 配置 GitHub Token，不得自动提交资产仓库，也不得实现 APK 下载、Unity 解包或游戏版本检测。
 
-远端协议：
-- 清单：
-  https://raw.githubusercontent.com/GuangShiX/mmtm-assets-fallback/main/manifest.json
-- 图片 URL：{manifest.base_url}/{asset.path}
-- 图片路径不包含游戏版本，更新判断必须使用每条 asset 的 sha256，不能只看 URL 或游戏版本。
-- 主要分类为 characters、enemies、equipment、spheres、items、ui。
-- 角色小头像名为 CHR_<六位角色ID>_<两位变体>_s.png，默认变体是 00。
+不可改变的资源优先级：
+1. 已存在的最终渲染缓存。
+2. helper 随包提供或以前下载并验证过的本地源图片。
+3. 统一 GitHubImageAssetService 查询 mmtm-assets-fallback。
+4. 仅对明确支持的类型使用有界降级来源；Tamamo 只能位于 GitHub 规范源之后。
+5. 不持久化为完整规范缓存的占位图/fallback SVG。
 
-开始修改前先检查真实代码路径，重点查看 CharacterIconService、
-CharacterIconController、GameIconRenderService、CharacterIcon.razor、
-wwwroot/cache/character-icons、wwwroot/cache/character-icon-assets 和
-wwwroot/images/items，确认现有缓存键和头像合成路径。
+本地最终缓存或源图片有效时必须零网络：不得在启动时、后台定时、普通渲染、缓存命中时发送 manifest GET、图片 GET、HEAD 或版本探测。只有真实本地缺失或用户在 /Diagnostics 显式“重新检查”时才允许访问远端。
 
-实现要求：
-1. 新增一个统一的 GitHubImageAssetService（名称可按现有风格调整），负责清单缓存、
-   资源查找、下载、SHA-256 校验和本地路径返回；其他页面不要各自直接发 HTTP 请求。
-2. 清单保存到本地并设置合理刷新间隔（建议 6 小时）。网络失败时可继续使用上次成功清单，
-   但不能把失败响应覆盖到本地。
-3. 图片按 category/name 保存在 helper 的持久缓存目录，并维护对应 sha256。
-   本地 SHA 与清单一致时不联网；不一致时重新下载。
-4. 下载到同目录临时文件，限制单文件最大 5 MiB，检查 HTTP 2xx、PNG 签名、文件大小和
-   SHA-256，全部通过后原子替换正式文件。失败时删除临时文件。
-5. 同一资源的并发请求必须合并，避免一个页面同时触发多次下载。设置连接/总超时和有限重试，
-   不允许无限重试。
-6. CharacterIconService 的合成素材改为从本服务取得。至少支持角色头像、plate_character、
-   icon_rarity_plus_star_1、icon_rarity_plus_star_2、frame_common_*、
-   frame_decoration_* 和 icon_element_*。
-7. 最终合成头像的缓存键必须包含所有输入图片的 SHA-256，或在输入 SHA 变化时准确失效；
-   不能继续只用角色 ID、等级和稀有度，否则远端同名图片更新后仍会返回旧合成图。
-8. 角色、敌人、装备、符石和物品找不到远端资源时，沿用现有本地图或占位图，不让页面报错，
-   也不要在每次渲染时反复请求同一个不存在的文件。
-9. 防止 category/name 路径穿越；不要把 GitHub token、账号或任何密钥加入配置，公开 Raw URL
-   不需要凭据。
-10. 保留现有账号作用域和只读页面行为，不要借此重构无关功能。
+任务一：做真实调用点审计
+- 搜索 Razor、CSS、ViewModel、服务和控制器中的 GitHub Raw/CDN/Tamamo URL、直接 wwwroot 游戏图片路径、CSS url(...)、独立 HttpClient 下载、重复 manifest/cache 实现。
+- 将结果按 characters、enemies、equipment、items、spheres、ui、background/prefab-sprite 分类。
+- 区分“随 helper 发布且稳定的本地产品素材”与“来自游戏包、应由资产仓库供应的游戏美术”；不要把字体、第三方网页、战报查看器等非游戏美术误纳入迁移。
+- 在最终报告中列出每个调用点的当前来源、目标共享服务、是否需要迁移和理由。
 
-验证要求：
-- 为清单命中、本地缓存命中、SHA 变化重下、损坏 PNG、哈希不符、网络失败使用旧清单、
-  并发请求合并、合成缓存失效补测试。
-- 用 CHR_000149_00_s.png 做真实首次下载和第二次本地命中验证。
-- 构建整个解决方案并报告实际缓存目录、测试结果和修改文件。
+任务二：补齐统一资产链路
+- 所有新增或修改的游戏美术调用点必须复用 GitHubImageAssetService；页面不得直接拼 Raw/CDN URL，也不得新建页面级下载器、manifest 或缓存。
+- 保留 CharacterIconService、EquipmentIconService、SphereIconService 等类型服务作为业务入口；它们共享一个 GitHubImageAssetService，不互相复制下载和校验代码。
+- 重点核查 SphereIconService：本地 SPH_*.png 缺失时通过共享服务查询 spheres/SPH_*.png，下载后继续使用原 GameIconRenderService 合成；不得增加独立宝珠 downloader。
+- 为页面 UI、背景、九切片和 Prefab Sprite 设计最小共享入口。请求必须有稳定 category/name/path 映射和来源页面；不要让 Razor/CSS 直接依赖远端 URL。已经随包提供且稳定的本地资产可继续作为优先本地源，不做无收益迁移。
+- 将缺失记录中的角色专用身份字段扩展为兼容旧 JSON 的通用资源身份（例如 ResourceType/ResourceId），保留读取现有 CharacterId 记录的兼容性。
+- 最终/合成缓存元数据必须记录全部规范源依赖 SHA-256。规范素材修复或显式重新检查成功后，精确失效依赖它的 Tamamo fallback、占位结果和最终合成缓存。
+
+任务三：保持下载与缺图语义
+- manifest 和图片只允许来自固定 GuangShiX/mmtm-assets-fallback Raw 基址；阻止路径穿越和跨主机 URL。
+- 校验 HTTP 2xx、manifest path/category/name、5 MiB 单文件上限、PNG 签名、chunk CRC、可解压图像、size 和 SHA-256。
+- 下载到目标目录临时文件，通过后原子替换；失败不能破坏旧的有效文件。
+- 同一 manifest 刷新、同一源图片下载和同一最终合成请求分别合并并发。
+- manifest 无条目、图片 404/410 或发布内容校验失败时创建一条持久缺失记录。
+- 超时、断网、限流和 5xx 只能短暂冷却，不得成为永久缺失。
+- Tamamo 或占位图成功不能把规范缺口标记为 Resolved，也不能伪装成 GitHub/local-source。
+- 普通重复渲染不得反复请求已确认缺失的 GitHub/Tamamo；只能由显式重新检查恢复。
+- /Diagnostics 保留重新检查、忽略、已提交、已解决和预填 GitHub Issue；不得无人工确认自动创建 Issue。
+
+任务四：建立“发现缺图 -> 资产仓库补全”交接结果
+- 对审计或测试发现的每个规范缺图，输出 category、name、expected path、来源页面/资源 ID、当前 fallback 和缺失原因。
+- 判断归属：
+  - manifest/规范 PNG 缺失：需要在 mmtm-apk-tracker 扩充提取模式或允许清单，再由资产 CI 发布。
+  - 提取、哈希、路径、CI 发布错误：mmtm-apk-tracker 问题。
+  - helper 名称映射、缓存、失效或渲染错误：helper 问题。
+- 本 session 以 helper 优化为主。未经明确授权不要跨仓库提交或发布；如果确实需要 tracker 改动，给出可直接执行的文件、规则、测试和预期资产清单。
+
+必须补充或更新回归断言，至少覆盖：
+- 最终缓存命中零 HTTP。
+- 本地源图片命中零 HTTP。
+- 首次缺失下载一次、第二次只读本地。
+- manifest/资源并发请求合并。
+- 宝珠本地缺失后从 GitHub 下载并进入原合成链路。
+- UI/Prefab Sprite 使用共享服务且不在页面拼远端 URL。
+- 损坏 PNG、chunk CRC 错误、size/SHA 不符、超限、路径穿越和跨主机 URL被拒绝。
+- 网络/5xx 不写永久缺失记录。
+- 404 只产生一条缺失记录；Tamamo/占位不掩盖缺口。
+- 显式重新检查取得规范资源后，缺失记录与依赖最终缓存准确更新。
+- 旧 CharacterId 缺失记录 JSON 仍可读取并迁移为通用资源身份。
+
+验证：
+1. 先对 MementoMori.Tests 做隔离构建。
+2. 运行生成的自定义断言程序：
+   dotnet exec <built MementoMori.Tests.dll> --github-image-asset-only
+3. 再使用新的隔离 artifacts 路径构建完整 MementoMori.sln：
+   dotnet build .\MementoMori.sln --artifacts-path <isolated-path> -nodeReuse:false -p:UseSharedCompilation=false
+4. 默认不要运行 --github-image-live；它会访问真实 GitHub，仅在用户明确授权实时网络验证后执行。
+5. 运行 git diff --check，并报告所有修改文件、测试结果、未验证边界和仍需由 tracker 补齐的资产清单。
+
+不要把本任务扩大为视觉重设计、账号逻辑、游戏 API、发布打包或无关告警清理。不要提交或推送，除非用户另行明确要求。
 ```

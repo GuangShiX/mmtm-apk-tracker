@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fallback import (
+    CHARACTER_MENU_UI_ASSET_NAMES,
+    CORE_UI_ASSET_NAMES,
     GENERATED_MARKER,
     UI_ASSET_NAMES,
     build_fallback_repository,
@@ -74,6 +76,13 @@ def create_version(root: Path, version="1.2.3") -> Path:
 
 
 class FallbackRepositoryTests(unittest.TestCase):
+    def test_ui_allowlist_preserves_character_menu_dependencies(self):
+        self.assertEqual(len(CORE_UI_ASSET_NAMES), 21)
+        self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
+        self.assertEqual(len(UI_ASSET_NAMES), 70)
+        self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
+        self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
+
     def test_builds_small_canonical_repository_with_stable_urls(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -87,7 +96,7 @@ class FallbackRepositoryTests(unittest.TestCase):
                 generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             )
 
-            self.assertEqual(manifest["asset_count"], 26)
+            self.assertEqual(manifest["asset_count"], len(UI_ASSET_NAMES) + 5)
             self.assertEqual(manifest["ref"], "main")
             self.assertEqual(manifest["archive_ref"], "v1.2.3")
             self.assertEqual(
