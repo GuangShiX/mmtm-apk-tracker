@@ -36,7 +36,7 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v1"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v2"
 MARGIN = 48
 GAP = 30
 LEFT_WIDTH = 1380
@@ -75,6 +75,9 @@ class FontSet:
     sans: Path
     medium: Path
     serif: Path
+    sans_index: int = 0
+    medium_index: int = 0
+    serif_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -103,15 +106,45 @@ def _font_candidates() -> FontSet:
     )
     for fonts in candidates:
         if all(path.is_file() for path in (fonts.sans, fonts.medium, fonts.serif)):
+            if all(
+                path.suffix.casefold() == ".ttc"
+                for path in (fonts.sans, fonts.medium, fonts.serif)
+            ):
+                return FontSet(
+                    fonts.sans,
+                    fonts.medium,
+                    fonts.serif,
+                    sans_index=_font_collection_index(fonts.sans),
+                    medium_index=_font_collection_index(fonts.medium),
+                    serif_index=_font_collection_index(fonts.serif),
+                )
             return fonts
     raise RuntimeError(
         "找不到中文字体；Windows 需要 Noto Sans/Serif SC，Linux 需要 fonts-noto-cjk"
     )
 
 
+def _font_collection_index(path: Path, family_marker: str = "CJK SC") -> int:
+    """Resolve the Simplified Chinese face instead of TTC's default JP face."""
+    for index in range(32):
+        try:
+            face = ImageFont.truetype(str(path), 16, index=index)
+        except OSError:
+            break
+        family, _style = face.getname()
+        if family_marker.casefold() in family.casefold():
+            return index
+    raise RuntimeError(f"字体集合不包含 {family_marker} 字面: {path}")
+
+
 def _font(fonts: FontSet, size: int, *, serif: bool = False, medium: bool = False):
-    path = fonts.serif if serif else (fonts.medium if medium else fonts.sans)
-    return ImageFont.truetype(str(path), size)
+    if serif:
+        path, index = fonts.serif, fonts.serif_index
+    elif medium:
+        path, index = fonts.medium, fonts.medium_index
+    else:
+        path, index = fonts.sans, fonts.sans_index
+    return ImageFont.truetype(str(path), size, index=index)
 
 
 def _localized(mapping: Any, language: str) -> str | None:

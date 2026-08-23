@@ -14,6 +14,8 @@ from skill_card import (
     COMPACT_TEMPLATE_VERSION,
     COMPACT_WIDTH,
     FontSet,
+    _font,
+    _font_collection_index,
     _compact_skill_text,
     _card_manifest_key,
     _level_label,
@@ -52,6 +54,48 @@ def _skill(skill_id, kind, name):
 
 
 class SkillCardTests(unittest.TestCase):
+    def test_font_collection_resolves_simplified_chinese_face_by_name(self):
+        family_names = [
+            "Noto Sans CJK JP",
+            "Noto Sans CJK KR",
+            "Noto Sans CJK SC",
+        ]
+
+        class FakeFace:
+            def __init__(self, family):
+                self.family = family
+
+            def getname(self):
+                return self.family, "Regular"
+
+        with patch(
+            "skill_card.ImageFont.truetype",
+            side_effect=lambda _path, _size, index=0: FakeFace(family_names[index]),
+        ):
+            self.assertEqual(_font_collection_index(Path("noto.ttc")), 2)
+
+    def test_font_uses_explicit_collection_face_index(self):
+        fonts = FontSet(
+            Path("regular.ttc"),
+            Path("bold.ttc"),
+            Path("serif.ttc"),
+            sans_index=2,
+            medium_index=3,
+            serif_index=4,
+        )
+
+        with patch("skill_card.ImageFont.truetype") as truetype:
+            _font(fonts, 42)
+            truetype.assert_called_once_with("regular.ttc", 42, index=2)
+
+        with patch("skill_card.ImageFont.truetype") as truetype:
+            _font(fonts, 43, medium=True)
+            truetype.assert_called_once_with("bold.ttc", 43, index=3)
+
+        with patch("skill_card.ImageFont.truetype") as truetype:
+            _font(fonts, 44, serif=True)
+            truetype.assert_called_once_with("serif.ttc", 44, index=4)
+
     def test_equipment_rarity_uses_ex_label(self):
         self.assertEqual(
             _level_label({"order": 4, "equipment_rarity_flags": 128}), "Ex1"
