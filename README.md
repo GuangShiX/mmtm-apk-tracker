@@ -141,7 +141,7 @@ python skill_card.py \
   --output-dir fallback_dist/cards/characters
 ```
 
-生成器会从官方 Addressables catalog 精确解析 `CharacterIcon/CHR_<ID>`、`Icon/Equipment/EQP_<图标ID>` 和 `Icon/Skill/CSK_<技能ID>` 的 Bundle，并缓存已校验下载。全文版文件名为 `character-<ID>-zh-CN.png`，省流版为 `character-<ID>-compact-zh-CN.png`。批量生成会同步维护 `cards/manifest.json`，记录角色技能 JSON 哈希、模板版本、素材版本、图片哈希和尺寸；CI 先做离线校验，只有最新角色缺图或数据/模板变化时才访问官方素材并重绘。每个技能面板会选择能够完整容纳正文的最大可读字号；若四技能无法在单图中清晰排入，生成会明确失败，不会缩成小字或裁掉内容。
+生成器会从官方 Addressables catalog 精确解析 `CharacterIcon/CHR_<ID>`、`Icon/Equipment/EQP_<图标ID>` 和 `Icon/Skill/CSK_<技能ID>` 的 Bundle，并缓存已校验下载。全文版文件名为 `character-<ID>-zh-CN.png`，省流版为 `character-<ID>-compact-zh-CN.png`。批量生成会同步维护 `cards/manifest.json`，记录角色技能 JSON 哈希、模板版本、素材版本、图片哈希和尺寸；CI 先验证现有 Master 导出，官方 `masterVersion` 未变化且没有已到期的未来角色时不重复下载 MasterBook，再离线检查卡片，只在最新角色缺图或数据/模板变化时获取官方美术素材并重绘。每个技能面板会选择能够完整容纳正文的最大可读字号；若四技能无法在单图中清晰排入，生成会明确失败，不会缩成小字或裁掉内容。
 
 helper 侧的实现边界和新 session 提示词见 [docs/helper-image-cache-handoff.md](docs/helper-image-cache-handoff.md)。
 

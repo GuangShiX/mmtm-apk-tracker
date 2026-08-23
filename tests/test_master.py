@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 import msgpack
 
-from master import JST, MasterSource, build_master_skill_repository
+from master import (
+    JST,
+    MasterSource,
+    build_master_skill_repository,
+    load_current_master_skill_repository,
+)
 
 
 def _character(character_id, start_time, active_id, passive_id):
@@ -212,6 +217,44 @@ def _write_master_fixture(root: Path) -> None:
 
 
 class MasterSkillTests(unittest.TestCase):
+    def test_verified_current_master_repository_skips_same_version_download(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            master_dir = root / "master"
+            master_dir.mkdir()
+            _write_master_fixture(master_dir)
+            repository = root / "repository"
+            as_of = datetime(2026, 8, 13, 16, tzinfo=JST)
+            build_master_skill_repository(
+                master_dir,
+                repository,
+                "owner/repository",
+                MasterSource("4.20.0", "asset", "1786600691299"),
+                as_of=as_of,
+            )
+
+            current = load_current_master_skill_repository(
+                repository,
+                "1786600691299",
+                ("zh-CN",),
+                as_of,
+            )
+
+            self.assertIsNotNone(current)
+            self.assertEqual(
+                [item["id"] for item in current["latest_characters"]],
+                [5],
+            )
+            self.assertEqual(current["next_release_time_jst"], "2100-01-01 15:00:00")
+            self.assertIsNone(
+                load_current_master_skill_repository(
+                    repository,
+                    "1786600691299",
+                    ("zh-CN",),
+                    datetime(2100, 1, 1, 15, tzinfo=JST),
+                )
+            )
+
     def test_latest_uses_release_time_not_largest_id(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

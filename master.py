@@ -203,6 +203,60 @@ def load_master_books(
     return tables, selected_metadata
 
 
+def load_current_master_skill_repository(
+    output_dir: Path,
+    master_version: str,
+    languages: Iterable[str],
+    as_of: datetime,
+) -> dict[str, Any] | None:
+    skills_dir = output_dir.resolve() / "skills"
+    if not (skills_dir / GENERATED_MARKER).is_file():
+        return None
+    try:
+        latest = json.loads((skills_dir / "latest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (skills_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        requested_languages = tuple(dict.fromkeys(languages))
+        if latest.get("source", {}).get("master_version") != master_version:
+            return None
+        if manifest.get("source", {}).get("master_version") != master_version:
+            return None
+        if tuple(latest.get("languages") or ()) != requested_languages:
+            return None
+        if tuple(manifest.get("languages") or ()) != requested_languages:
+            return None
+        next_release = latest.get("next_release_time_jst")
+        if isinstance(next_release, str) and _parse_jst(next_release) <= as_of:
+            return None
+        files = manifest.get("files")
+        if not isinstance(files, list) or manifest.get("file_count") != len(files):
+            return None
+        root = output_dir.resolve()
+        for entry in files:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                return None
+            target = (root / entry["path"]).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                return None
+            if target.stat().st_size != entry.get("size"):
+                return None
+            if _sha256(target) != entry.get("sha256"):
+                return None
+        latest_characters = latest.get("latest_characters")
+        if not isinstance(latest_characters, list) or not latest_characters:
+            return None
+        for character in latest_characters:
+            if not isinstance(character, dict) or not isinstance(character.get("path"), str):
+                return None
+            target = (root / character["path"]).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                return None
+        return latest
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _parse_jst(value: str) -> datetime:
     try:
         moment = datetime.fromisoformat(value)
@@ -709,6 +763,7 @@ def build_master_skill_repository(
     exclusive_weapons = _exclusive_weapon_index(tables, text_maps)
     arcanas = _arcana_index(tables, text_maps)
     released: list[tuple[datetime, dict[str, Any]]] = []
+    future_release_times: list[datetime] = []
     for character in tables["CharacterMB"]:
         if not isinstance(character, dict) or not isinstance(character.get("Id"), int):
             raise RuntimeError("CharacterMB 包含无效记录")
@@ -717,6 +772,8 @@ def build_master_skill_repository(
         start = _parse_jst(character.get("StartTimeFixJST"))
         if start <= as_of:
             released.append((start, character))
+        else:
+            future_release_times.append(start)
     if not released:
         raise RuntimeError("按实装时间过滤后没有可发布角色")
     released.sort(key=lambda item: (item[0], item[1]["Id"]))
@@ -819,6 +876,11 @@ def build_master_skill_repository(
             "source": source_payload,
             "languages": list(languages),
             "latest_release_time_jst": latest_start.strftime("%Y-%m-%d %H:%M:%S"),
+            "next_release_time_jst": (
+                min(future_release_times).strftime("%Y-%m-%d %H:%M:%S")
+                if future_release_times
+                else None
+            ),
             "latest_characters": latest_characters,
             "index_url": f"{raw_base}/skills/index.json",
             "manifest_url": f"{raw_base}/skills/manifest.json",
@@ -867,6 +929,19 @@ def main() -> int:
             source = MasterSource(
                 info.app_version, info.asset_version, info.master_version
             )
+            latest = load_current_master_skill_repository(
+                args.output,
+                source.master_version,
+                languages,
+                as_of,
+            )
+            if latest is not None:
+                latest_ids = [item["id"] for item in latest["latest_characters"]]
+                print(
+                    f"官方 Master 版本未变化: masterVersion={source.master_version}, "
+                    f"latest={latest_ids}"
+                )
+                return 0
             with tempfile.TemporaryDirectory(prefix="mmtm-master-download-") as temporary:
                 master_dir = download_master_books(info, Path(temporary), languages)
                 latest = build_master_skill_repository(

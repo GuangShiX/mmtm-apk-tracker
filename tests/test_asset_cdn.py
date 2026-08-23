@@ -134,6 +134,10 @@ class AssetCdnTests(unittest.TestCase):
                 get.call_args.kwargs["headers"]["range"],
                 "bytes=11-",
             )
+            self.assertEqual(
+                get.call_args.kwargs["headers"]["accept-encoding"],
+                "identity",
+            )
 
     def test_official_asset_url_uses_fixed_format(self):
         info = OfficialAssetInfo(

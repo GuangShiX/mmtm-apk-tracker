@@ -20,7 +20,11 @@ AUTH_URL = "https://prd1-auth.mememori-boi.com/api/auth/getDataUri"
 OFFICIAL_APK_URL = "https://mememori-game.com/apps/mementomori_{version}.apk"
 REQUEST_TIMEOUT_SECONDS = 120
 ASSET_HEADERS = {
-    "accept-encoding": "gzip, identity",
+    # Range resumption and Content-Length validation are defined over the
+    # transferred representation. Request identity encoding so requests does
+    # not transparently expand gzip data and make a valid response look longer
+    # than the server's Content-Length.
+    "accept-encoding": "identity",
     "user-agent": "BestHTTP/2 v2.3.0",
     "pragma": "no-cache",
     "cache-control": "no-cache",
