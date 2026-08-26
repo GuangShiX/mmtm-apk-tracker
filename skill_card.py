@@ -36,7 +36,8 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v2"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v3"
+COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
 LEFT_WIDTH = 1380
@@ -145,6 +146,24 @@ def _font(fonts: FontSet, size: int, *, serif: bool = False, medium: bool = Fals
     else:
         path, index = fonts.sans, fonts.sans_index
     return ImageFont.truetype(str(path), size, index=index)
+
+
+def _draw_compact_watermark(
+    draw: ImageDraw.ImageDraw,
+    fonts: FontSet,
+    *,
+    right: int,
+    top: int,
+) -> tuple[int, int]:
+    face = _font(fonts, 34, medium=True)
+    x = round(right - draw.textlength(COMPACT_WATERMARK, font=face))
+    draw.text(
+        (x, top),
+        COMPACT_WATERMARK,
+        font=face,
+        fill=(184, 177, 164, 255),
+    )
+    return x, top
 
 
 def _localized(mapping: Any, language: str) -> str | None:
@@ -971,6 +990,12 @@ def _render_compact_skill_card(
         (identity_x, identity_top + 260, panel_right - 42, identity_top + 260),
         fill=(224, 171, 83, 130),
         width=3,
+    )
+    _draw_compact_watermark(
+        draw,
+        fonts,
+        right=panel_right - 34,
+        top=identity_top + 22,
     )
 
     # Skills own the largest share of the portrait canvas and appear before all

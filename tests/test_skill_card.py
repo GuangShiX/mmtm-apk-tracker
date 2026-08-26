@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -14,6 +14,8 @@ from skill_card import (
     COMPACT_TEMPLATE_VERSION,
     COMPACT_WIDTH,
     FontSet,
+    COMPACT_WATERMARK,
+    _draw_compact_watermark,
     _font,
     _font_collection_index,
     _compact_skill_text,
@@ -54,6 +56,33 @@ def _skill(skill_id, kind, name):
 
 
 class SkillCardTests(unittest.TestCase):
+    def test_compact_watermark_is_right_aligned_with_expected_author(self):
+        fonts = FontSet(
+            Path("regular.ttf"),
+            Path("medium.ttf"),
+            Path("serif.ttf"),
+        )
+        draw = Mock()
+        draw.textlength.return_value = 240.4
+        face = object()
+
+        with patch("skill_card._font", return_value=face):
+            position = _draw_compact_watermark(
+                draw,
+                fonts,
+                right=1000,
+                top=82,
+            )
+
+        self.assertEqual(COMPACT_WATERMARK, "Made By 光时")
+        self.assertEqual(position, (760, 82))
+        draw.text.assert_called_once_with(
+            (760, 82),
+            "Made By 光时",
+            font=face,
+            fill=(184, 177, 164, 255),
+        )
+
     def test_font_collection_resolves_simplified_chinese_face_by_name(self):
         family_names = [
             "Noto Sans CJK JP",
