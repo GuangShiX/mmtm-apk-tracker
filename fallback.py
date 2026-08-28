@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import UnityPy
+from PIL import Image
 
+from asset_requests import (
+    load_asset_request_registry,
+    requested_asset_for_name,
+    requested_names_for_group,
+)
 from asset_cdn import (
     CatalogTarget,
     OfficialAssetInfo,
@@ -42,99 +48,20 @@ ROOT = Path(__file__).parent
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 GENERATED_MARKER = ".generated-by-mmtm-apk-tracker"
 MAX_ASSET_COUNT = 3000
-MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 100 * 1024 * 1024
 
-CORE_UI_ASSET_NAMES = {
-    "Background_Default.png",
-    "frame_common_lr_slice.png",
-    "frame_common_slice.png",
-    "frame_common_watercolor.png",
-    "frame_decoration_rplus.png",
-    "frame_decoration_srplus.png",
-    "frame_decoration_ssrplus.png",
-    "frame_decoration_urplus.png",
-    "frame_sphere_metal.png",
-    "frame_sphere_watercolor.png",
-    "icon_element_0.png",
-    "icon_element_1.png",
-    "icon_element_2.png",
-    "icon_element_3.png",
-    "icon_element_4.png",
-    "icon_element_5.png",
-    "icon_element_6.png",
-    "icon_rarity_plus_star_1.png",
-    "icon_rarity_plus_star_2.png",
-    "plate_character.png",
-    "tab_bg.png",
+ASSET_REQUEST_REGISTRY = load_asset_request_registry()
+CORE_UI_ASSET_NAMES = set(requested_names_for_group("avatar-compositor-core"))
+CHARACTER_MENU_UI_ASSET_NAMES = set(
+    requested_names_for_group("character-menu-workbench")
+)
+COMMON_GAMEPLAY_UI_ASSET_NAMES = set(
+    requested_names_for_group("helper-common-gameplay-ui")
+)
+UI_ASSET_NAMES = {
+    asset.name for asset in ASSET_REQUEST_REGISTRY.assets if asset.category == "ui"
 }
-
-# Visual dependencies referenced by CharacterMenuViewController in the 4.18.0
-# Prefab evidence. Keep these explicit so the lightweight package/catalog scan
-# exports the same page chrome as the complete extraction pipeline.
-# Source SHA-256: a8029100b538090281a277c39351d501ff481478f04b2244414d4e4b4b3b67b6
-CHARACTER_MENU_UI_ASSET_NAMES = {
-    "arrow_s_03.png",
-    "base_badge.png",
-    "base_empty_01.png",
-    "base_filter_01.png",
-    "base_filter_02.png",
-    "base_headline_01.png",
-    "base_l_01.png",
-    "base_number_02.png",
-    "base_number_05.png",
-    "base_number_06.png",
-    "base_number_07.png",
-    "base_s_03.png",
-    "base_scenario.png",
-    "base_square_02.png",
-    "base_square_03.png",
-    "base_square_04.png",
-    "base_white.png",
-    "button_l_01.png",
-    "button_l_01_white.png",
-    "button_m_02.png",
-    "button_plus_01.png",
-    "button_s_01.png",
-    "decoration_border_02.png",
-    "decoration_brush_02.png",
-    "equipment_synchro_cell_base.png",
-    "equipment_synchro_chain.png",
-    "frame_decoration_rplus.png",
-    "gradation_01.png",
-    "gradation_02.png",
-    "icon_battle_power_01.png",
-    "icon_check_03.png",
-    "icon_element_1.png",
-    "icon_element_2.png",
-    "icon_element_3.png",
-    "icon_element_4.png",
-    "icon_element_5.png",
-    "icon_element_6.png",
-    "icon_fragment.png",
-    "icon_guest.png",
-    "icon_job_warrior.png",
-    "icon_lock.png",
-    "icon_lock_equipment.png",
-    "icon_monologue.png",
-    "icon_playericon.png",
-    "icon_plus.png",
-    "icon_rarity_plus_star_1.png",
-    "icon_sort.png",
-    "image_levellink.png",
-    "plate_character.png",
-    "plate_character_white_slice.png",
-    "scrollbar_background_02.png",
-    "scrollbar_foreground.png",
-    "sliderbar_foreground.png",
-    "toggle_01_off.png",
-    "toggle_all_off.png",
-    "toggle_all_on.png",
-    "toggle_attribute_off.png",
-    "toggle_attribute_on.png",
-}
-
-UI_ASSET_NAMES = CORE_UI_ASSET_NAMES | CHARACTER_MENU_UI_ASSET_NAMES
 UI_ASSET_NAMES_BY_CASE = {name.casefold(): name for name in UI_ASSET_NAMES}
 
 
@@ -181,6 +108,9 @@ def _canonical_name(relative_file: str, container: str) -> str:
 
 
 def _category(name: str) -> str | None:
+    requested = requested_asset_for_name(name)
+    if requested:
+        return requested.category
     if re.fullmatch(r"CHR_\d{6}_\d{2}_s\.png", name, re.IGNORECASE):
         return "characters"
     if re.fullmatch(r"ENE_\d{6}\.png", name, re.IGNORECASE):
@@ -525,6 +455,102 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _images_have_identical_pixels(first: Path, second: Path) -> bool:
+    try:
+        with Image.open(first) as left, Image.open(second) as right:
+            if left.size != right.size:
+                return False
+            return left.convert("RGBA").tobytes() == right.convert("RGBA").tobytes()
+    except (OSError, ValueError):
+        return False
+
+
+def _reuse_pixel_equivalent_repository_assets(
+    output_dir: Path,
+    staging: Path,
+    entries: list[dict[str, Any]],
+) -> int:
+    """Keep canonical PNG bytes when a platform encoder changes only compression."""
+    current = _load_repository_manifest(output_dir)
+    if current is None:
+        return 0
+    existing = {
+        (entry.get("category"), entry.get("name")): entry
+        for entry in current["assets"]
+        if isinstance(entry, dict)
+    }
+    reused = 0
+    for entry in entries:
+        old_entry = existing.get((entry["category"], entry["name"]))
+        if old_entry is None or not isinstance(old_entry.get("path"), str):
+            continue
+        old_path = output_dir / old_entry["path"]
+        new_path = staging / entry["path"]
+        if not old_path.is_file() or not new_path.is_file():
+            continue
+        old_size = old_path.stat().st_size
+        old_digest = _sha256(old_path)
+        if old_entry.get("size") != old_size or old_entry.get("sha256") != old_digest:
+            raise RuntimeError(f"既有资产仓库文件校验失败: {old_entry['path']}")
+        if not _images_have_identical_pixels(old_path, new_path):
+            continue
+        shutil.copyfile(old_path, new_path)
+        entry["size"] = old_size
+        entry["sha256"] = old_digest
+        reused += 1
+    if reused:
+        print(f"  复用像素一致的规范 PNG: {reused} 个")
+    return reused
+
+
+def _carry_forward_same_version_repository_assets(
+    version: str,
+    output_dir: Path,
+    staging: Path,
+    entries: list[dict[str, Any]],
+) -> int:
+    """Retain catalog-only assets while rebuilding the same app package version."""
+    current = _load_repository_manifest(output_dir)
+    if current is None or current.get("version") != version:
+        return 0
+    known = {(entry["category"], entry["name"]) for entry in entries}
+    carried = 0
+    for old_entry in current["assets"]:
+        if not isinstance(old_entry, dict):
+            raise RuntimeError("既有资产仓库清单包含非对象条目")
+        key = (old_entry.get("category"), old_entry.get("name"))
+        if key in known:
+            continue
+        if not isinstance(key[1], str) or _category(key[1]) != key[0]:
+            # A curated request may have been intentionally removed. Only
+            # carry assets that are still selected by the current rules.
+            continue
+        relative = old_entry.get("path")
+        if not isinstance(relative, str):
+            raise RuntimeError(f"既有资产仓库路径无效: {key}")
+        old_path = (output_dir / relative).resolve()
+        new_path = (staging / relative).resolve()
+        try:
+            old_path.relative_to(output_dir.resolve())
+            new_path.relative_to(staging.resolve())
+        except ValueError as exc:
+            raise RuntimeError(f"既有资产仓库路径越界: {relative}") from exc
+        if not old_path.is_file():
+            raise RuntimeError(f"既有资产仓库文件缺失: {relative}")
+        size = old_path.stat().st_size
+        digest = _sha256(old_path)
+        if old_entry.get("size") != size or old_entry.get("sha256") != digest:
+            raise RuntimeError(f"既有资产仓库文件校验失败: {relative}")
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(old_path, new_path)
+        entries.append(dict(old_entry))
+        known.add(key)
+        carried += 1
+    if carried:
+        print(f"  保留同版本 catalog 专属资产: {carried} 个")
+    return carried
+
+
 def _prepare_assets_directory(output_dir: Path) -> Path:
     assets_dir = output_dir / "assets"
     marker = assets_dir / GENERATED_MARKER
@@ -549,6 +575,8 @@ def _write_repository_metadata(
     entries: list[dict[str, Any]],
     generated_at: datetime,
     extra: dict[str, Any] | None = None,
+    *,
+    require_requested_assets: bool = True,
 ) -> dict[str, Any]:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("repository 必须使用 owner/name 格式")
@@ -589,10 +617,28 @@ def _write_repository_metadata(
     )
     if missing_ui:
         raise RuntimeError(f"关键图标仓库缺少公共 UI 图标: {', '.join(missing_ui)}")
+    missing_requested = sorted(ASSET_REQUEST_REGISTRY.required_keys - seen)
+    if require_requested_assets and missing_requested:
+        labels = ", ".join(
+            f"{category}/{name}" for category, name in missing_requested
+        )
+        raise RuntimeError(f"关键图标仓库缺少已登记官方资产: {labels}")
 
     archive_ref = f"v{version}"
     raw_base = f"https://raw.githubusercontent.com/{repository}/main"
     metadata = dict(extra or {})
+    metadata.update(
+        {
+            "request_registry_sha256": ASSET_REQUEST_REGISTRY.fingerprint,
+            "request_registry_status": (
+                "complete" if not missing_requested else "incomplete"
+            ),
+            "requested_asset_count": len(ASSET_REQUEST_REGISTRY.assets),
+            "missing_requested_assets": [
+                f"{category}/{name}" for category, name in missing_requested
+            ],
+        }
+    )
     manifest = {
         "schema_version": 2,
         "game": "MementoMori",
@@ -622,7 +668,13 @@ def _write_repository_metadata(
         "asset_count": len(entries),
         "total_bytes": total_bytes,
     }
-    for name in ("asset_version", "master_version"):
+    for name in (
+        "asset_version",
+        "master_version",
+        "request_registry_sha256",
+        "request_registry_status",
+        "requested_asset_count",
+    ):
         if name in metadata:
             latest[name] = metadata[name]
     (output_dir / "manifest.json").write_text(
@@ -765,6 +817,10 @@ def build_fallback_from_package(
         entries = export_package_critical_assets(
             asset_apk, candidates, cab_index, assets_dir
         )
+        _reuse_pixel_equivalent_repository_assets(output_dir, staging, entries)
+        _carry_forward_same_version_repository_assets(
+            version, output_dir, staging, entries
+        )
         manifest = _write_repository_metadata(
             version,
             staging,
@@ -775,6 +831,7 @@ def build_fallback_from_package(
                 "generation_mode": "critical-package-scan",
                 "package_bundle_count": bundle_count,
             },
+            require_requested_assets=False,
         )
         _install_staged_repository(staging, output_dir)
         return manifest
@@ -802,7 +859,12 @@ def sync_official_hot_update(
             f"基础图标版本 {current.get('version')} 与官方版本 "
             f"{info.app_version} 不一致"
         )
-    if current.get("asset_version") == info.asset_version:
+    registry_is_current = (
+        current.get("request_registry_sha256")
+        == ASSET_REQUEST_REGISTRY.fingerprint
+        and current.get("request_registry_status") == "complete"
+    )
+    if current.get("asset_version") == info.asset_version and registry_is_current:
         print(f"官方资源版本未变化: {info.asset_version}")
         return current
     if not (output_dir / "assets" / GENERATED_MARKER).is_file():
@@ -871,6 +933,9 @@ def sync_official_hot_update(
                 cab_index,
                 staging / "assets",
             )
+            _reuse_pixel_equivalent_repository_assets(
+                output_dir, staging, exported_entries
+            )
 
         for entry in exported_entries:
             key = (entry["category"], entry["name"])
@@ -910,7 +975,17 @@ def auto_update_fallback_repository(
     info = get_official_asset_info()
     output_dir = output_dir.resolve()
     current = _load_repository_manifest(output_dir)
-    if current is None or current.get("version") != info.app_version:
+    registry_is_current = bool(
+        current
+        and current.get("request_registry_sha256")
+        == ASSET_REQUEST_REGISTRY.fingerprint
+        and current.get("request_registry_status") == "complete"
+    )
+    if (
+        current is None
+        or current.get("version") != info.app_version
+        or not registry_is_current
+    ):
         with tempfile.TemporaryDirectory(prefix="mmtm-official-apk-") as temporary_dir:
             source = package_path.resolve() if package_path else None
             if source is None:

@@ -15,6 +15,8 @@ from typing import Any, Iterable
 import msgpack
 import requests
 
+from asset_requests import requested_catalog_target
+
 VARS_URL = "https://mememori-game.com/apps/vars.js"
 AUTH_URL = "https://prd1-auth.mememori-boi.com/api/auth/getDataUri"
 OFFICIAL_APK_URL = "https://mememori-game.com/apps/mementomori_{version}.apk"
@@ -360,6 +362,9 @@ def _decode_catalog_entries(catalog: dict[str, Any]) -> list[_CatalogEntry]:
 
 
 def _critical_catalog_name(key: str) -> tuple[str, str] | None:
+    requested = requested_catalog_target(key)
+    if requested:
+        return requested
     patterns = (
         ("characters", r"CharacterIcon/CHR_\d{6}/(CHR_\d{6}_\d{2}_s)"),
         ("enemies", r"Icon/Enemy/(ENE_\d{6})"),

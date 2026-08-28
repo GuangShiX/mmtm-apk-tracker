@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -6,10 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fallback import (
+    ASSET_REQUEST_REGISTRY,
     CHARACTER_MENU_UI_ASSET_NAMES,
+    COMMON_GAMEPLAY_UI_ASSET_NAMES,
     CORE_UI_ASSET_NAMES,
     GENERATED_MARKER,
     UI_ASSET_NAMES,
+    _reuse_pixel_equivalent_repository_assets,
+    _carry_forward_same_version_repository_assets,
     build_fallback_repository,
 )
 
@@ -70,6 +75,9 @@ def create_version(root: Path, version="1.2.3") -> Path:
             add(name, "ui", container=False, canonical=False)
         else:
             add(name, "ui")
+    for request in ASSET_REQUEST_REGISTRY.assets:
+        if request.category != "ui":
+            add(request.name, request.category)
     connection.commit()
     connection.close()
     return version_dir
@@ -79,7 +87,9 @@ class FallbackRepositoryTests(unittest.TestCase):
     def test_ui_allowlist_preserves_character_menu_dependencies(self):
         self.assertEqual(len(CORE_UI_ASSET_NAMES), 21)
         self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
-        self.assertEqual(len(UI_ASSET_NAMES), 70)
+        self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
+        self.assertEqual(len(UI_ASSET_NAMES), 86)
+        self.assertEqual(len(ASSET_REQUEST_REGISTRY.assets), 100)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
         self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
 
@@ -96,7 +106,14 @@ class FallbackRepositoryTests(unittest.TestCase):
                 generated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             )
 
-            self.assertEqual(manifest["asset_count"], len(UI_ASSET_NAMES) + 5)
+            self.assertEqual(
+                manifest["asset_count"], len(ASSET_REQUEST_REGISTRY.assets) + 5
+            )
+            self.assertEqual(manifest["request_registry_status"], "complete")
+            self.assertEqual(
+                manifest["request_registry_sha256"],
+                ASSET_REQUEST_REGISTRY.fingerprint,
+            )
             self.assertEqual(manifest["ref"], "main")
             self.assertEqual(manifest["archive_ref"], "v1.2.3")
             self.assertEqual(
@@ -130,6 +147,91 @@ class FallbackRepositoryTests(unittest.TestCase):
             (output / "assets").mkdir(parents=True)
             with self.assertRaisesRegex(RuntimeError, "拒绝清理"):
                 build_fallback_repository("1.2.3", output, "owner/icons", version_dir)
+
+    def test_reuses_existing_png_bytes_when_decoded_pixels_match(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "output"
+            staging = root / "staging"
+            relative = Path("assets/ui/example.png")
+            old_path = output / relative
+            new_path = staging / relative
+            old_path.parent.mkdir(parents=True)
+            new_path.parent.mkdir(parents=True)
+            image = Image.new("RGBA", (8, 8), (40, 80, 120, 255))
+            image.save(old_path, compress_level=0)
+            image.save(new_path, compress_level=9)
+            old_content = old_path.read_bytes()
+            new_content = new_path.read_bytes()
+            self.assertNotEqual(old_content, new_content)
+            (output / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "assets": [
+                            {
+                                "category": "ui",
+                                "name": "example.png",
+                                "path": relative.as_posix(),
+                                "size": len(old_content),
+                                "sha256": hashlib.sha256(old_content).hexdigest(),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            entries = [
+                {
+                    "category": "ui",
+                    "name": "example.png",
+                    "path": relative.as_posix(),
+                    "size": len(new_content),
+                    "sha256": hashlib.sha256(new_content).hexdigest(),
+                }
+            ]
+
+            reused = _reuse_pixel_equivalent_repository_assets(
+                output, staging, entries
+            )
+
+            self.assertEqual(reused, 1)
+            self.assertEqual(new_path.read_bytes(), old_content)
+            self.assertEqual(entries[0]["size"], len(old_content))
+
+    def test_carries_catalog_only_asset_during_same_version_rebuild(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "output"
+            staging = root / "staging"
+            relative = Path("assets/characters/CHR_000150_00_s.png")
+            source = output / relative
+            source.parent.mkdir(parents=True)
+            staging.mkdir()
+            source.write_bytes(b"catalog-only")
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            entry = {
+                "category": "characters",
+                "name": source.name,
+                "path": relative.as_posix(),
+                "size": source.stat().st_size,
+                "sha256": digest,
+                "source_catalog_keys": ["CharacterIcon/CHR_000150/CHR_000150_00_s"],
+            }
+            (output / "manifest.json").write_text(
+                json.dumps({"version": "4.21.0", "assets": [entry]}),
+                encoding="utf-8",
+            )
+            entries = []
+
+            carried = _carry_forward_same_version_repository_assets(
+                "4.21.0", output, staging, entries
+            )
+
+            self.assertEqual(carried, 1)
+            self.assertEqual(entries, [entry])
+            self.assertEqual((staging / relative).read_bytes(), b"catalog-only")
 
 
 if __name__ == "__main__":

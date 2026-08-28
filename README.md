@@ -4,6 +4,8 @@
 
 关键小图标和角色技能另有轻量自动更新流程：分别检查官方应用版本、Addressables 资源版本和 Master 版本，并提交到独立 GitHub 数据仓库。
 
+新增官方头像、图标或地图前，先按[官方游戏美术资产按需补全工作流](docs/official-game-art-workflow.md)登记消费者、来源证据和精确资源身份；生成后的仓库必须通过独立清单、哈希、PNG 与头像尺寸验收。
+
 ## 能力范围
 
 完整提取分为两层：
@@ -74,6 +76,10 @@ python fallback.py --remote-info
 # 自动处理基础 APK 更新和同版本资源热更新
 python fallback.py --auto-update --output fallback_dist
 
+# 查看按需资产登记摘要并验收生成结果
+python asset_requests.py list
+python asset_requests.py verify-repository --repository fallback_dist
+
 # 只合并官方 Addressables 热更新图片
 python fallback.py --sync-hot-update --output fallback_dist
 
@@ -84,10 +90,11 @@ python fallback.py --from-package --version 4.18.0 --apk apks/game.xapk --output
 python fallback.py --version 4.18.0 --output fallback_dist
 ```
 
-自动流程使用两个更新键：
+自动流程使用三个更新键：
 
 1. `appVersion` 变化时下载一次官方 APK，扫描全部 Bundle 但只导出关键图片；大文件断线重试会保留临时文件并通过 HTTP Range 续传。
 2. `assetVersion` 变化时解析官方 Addressables catalog，只下载新增或内容哈希变化的关键图片 Bundle。
+3. `config/official_asset_requests.json` 的 SHA-256 变化时，即使游戏版本不变也重新扫描基础包，再精确合并清单中可由 Addressables 补齐的素材。
 
 这能覆盖“不更新 APK、只通过游戏资源热更新发布新角色”的情况。图片 URL 始终使用 `main/assets/...` 固定路径，不带游戏版本；`manifest.json` 为每张 PNG 提供 SHA-256，消费端下载后应校验并保存到本地缓存。
 

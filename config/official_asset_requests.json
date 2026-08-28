@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "game": "MementoMori",
+  "policy": {
+    "owner": "mmtm-apk-tracker",
+    "generated_repository": "GuangShiX/mmtm-assets-fallback",
+    "rule": "Register exact official assets only when a consumer needs them; never bulk-publish the full game art catalog."
+  },
+  "groups": [
+    {
+      "id": "avatar-compositor-core",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "package",
+      "consumers": [
+        "mementomori-helper-master:character-avatar-compositor"
+      ],
+      "reason": "Official frames, element badges and shared chrome used to compose data-bearing character portraits.",
+      "names": [
+        "Background_Default.png",
+        "frame_common_lr_slice.png",
+        "frame_common_slice.png",
+        "frame_common_watercolor.png",
+        "frame_decoration_rplus.png",
+        "frame_decoration_srplus.png",
+        "frame_decoration_ssrplus.png",
+        "frame_decoration_urplus.png",
+        "frame_sphere_metal.png",
+        "frame_sphere_watercolor.png",
+        "icon_element_0.png",
+        "icon_element_1.png",
+        "icon_element_2.png",
+        "icon_element_3.png",
+        "icon_element_4.png",
+        "icon_element_5.png",
+        "icon_element_6.png",
+        "icon_rarity_plus_star_1.png",
+        "icon_rarity_plus_star_2.png",
+        "plate_character.png",
+        "tab_bg.png"
+      ]
+    },
+    {
+      "id": "character-menu-workbench",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "package",
+      "consumers": [
+        "mementomori-helper-web:character-workbench"
+      ],
+      "reason": "Exact Sprite dependencies proven by the official CharacterMenuViewController prefab.",
+      "evidence": {
+        "prefab_sha256": "a8029100b538090281a277c39351d501ff481478f04b2244414d4e4b4b3b67b6"
+      },
+      "names": [
+        "arrow_s_03.png",
+        "base_badge.png",
+        "base_empty_01.png",
+        "base_filter_01.png",
+        "base_filter_02.png",
+        "base_headline_01.png",
+        "base_l_01.png",
+        "base_number_02.png",
+        "base_number_05.png",
+        "base_number_06.png",
+        "base_number_07.png",
+        "base_s_03.png",
+        "base_scenario.png",
+        "base_square_02.png",
+        "base_square_03.png",
+        "base_square_04.png",
+        "base_white.png",
+        "button_l_01.png",
+        "button_l_01_white.png",
+        "button_m_02.png",
+        "button_plus_01.png",
+        "button_s_01.png",
+        "decoration_border_02.png",
+        "decoration_brush_02.png",
+        "equipment_synchro_cell_base.png",
+        "equipment_synchro_chain.png",
+        "frame_decoration_rplus.png",
+        "gradation_01.png",
+        "gradation_02.png",
+        "icon_battle_power_01.png",
+        "icon_check_03.png",
+        "icon_element_1.png",
+        "icon_element_2.png",
+        "icon_element_3.png",
+        "icon_element_4.png",
+        "icon_element_5.png",
+        "icon_element_6.png",
+        "icon_fragment.png",
+        "icon_guest.png",
+        "icon_job_warrior.png",
+        "icon_lock.png",
+        "icon_lock_equipment.png",
+        "icon_monologue.png",
+        "icon_playericon.png",
+        "icon_plus.png",
+        "icon_rarity_plus_star_1.png",
+        "icon_sort.png",
+        "image_levellink.png",
+        "plate_character.png",
+        "plate_character_white_slice.png",
+        "scrollbar_background_02.png",
+        "scrollbar_foreground.png",
+        "sliderbar_foreground.png",
+        "toggle_01_off.png",
+        "toggle_all_off.png",
+        "toggle_all_on.png",
+        "toggle_attribute_off.png",
+        "toggle_attribute_on.png"
+      ]
+    },
+    {
+      "id": "helper-common-gameplay-ui",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "package",
+      "consumers": [
+        "mementomori-helper-master:gameplay-ui"
+      ],
+      "reason": "Frequently reused gameplay chrome and mode art identified by the Helper official-asset audit.",
+      "names": [
+        "toggle_04_off.png",
+        "base_metal.png",
+        "base_ribbon_01.png",
+        "Castle_0_0.png",
+        "Castle_0_1.png",
+        "Castle_0_2.png",
+        "Castle_1_0.png",
+        "Castle_1_1.png",
+        "Castle_1_2.png",
+        "Map_0.png",
+        "Map_1.png",
+        "RQB_000001.png",
+        "RQB_000002.png",
+        "RQB_000003.png",
+        "RQB_000004.png",
+        "RQB_000005.png"
+      ]
+    },
+    {
+      "id": "account-special-player-icons-2026-08-28",
+      "category": "characters",
+      "kind": "special-player-icon",
+      "delivery": "package-or-addressables",
+      "consumers": [
+        "mementomori-helper-master:account-list-avatar",
+        "mementomori-helper-web:account-list-avatar"
+      ],
+      "reason": "Special/redeemable player icons observed in current account snapshots; required to avoid placeholder avatars.",
+      "evidence": {
+        "master_book": "SpecialIconItemMB",
+        "verified_master_version": "1787808602106",
+        "verified_on": "2026-08-28"
+      },
+      "assets": [
+        {
+          "name": "CHR_000042_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000042/CHR_000042_00_em_001",
+          "special_icon_item_id": 42,
+          "character_id": 42,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000065_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000065/CHR_000065_00_em_001",
+          "special_icon_item_id": 65,
+          "character_id": 65,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000068_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000068/CHR_000068_00_em_001",
+          "special_icon_item_id": 68,
+          "character_id": 68,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000069_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000069/CHR_000069_00_em_001",
+          "special_icon_item_id": 69,
+          "character_id": 69,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000071_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000071/CHR_000071_00_em_001",
+          "special_icon_item_id": 71,
+          "character_id": 71,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000075_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000075/CHR_000075_00_em_001",
+          "special_icon_item_id": 75,
+          "character_id": 75,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000076_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000076/CHR_000076_00_em_001",
+          "special_icon_item_id": 76,
+          "character_id": 76,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000078_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000078/CHR_000078_00_em_001",
+          "special_icon_item_id": 78,
+          "character_id": 78,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000089_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000089/CHR_000089_00_em_001",
+          "special_icon_item_id": 89,
+          "character_id": 89,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000101_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000101/CHR_000101_00_em_001",
+          "special_icon_item_id": 101,
+          "character_id": 101,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000102_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000102/CHR_000102_00_em_001",
+          "special_icon_item_id": 102,
+          "character_id": 102,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000129_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000129/CHR_000129_00_em_001",
+          "special_icon_item_id": 129,
+          "character_id": 129,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000135_00_em_001.png",
+          "addressable_key": "CharacterIcon/CHR_000135/CHR_000135_00_em_001",
+          "special_icon_item_id": 135,
+          "character_id": 135,
+          "icon_id": 1
+        },
+        {
+          "name": "CHR_000045_00_em_002.png",
+          "addressable_key": "CharacterIcon/CHR_000045/CHR_000045_00_em_002",
+          "special_icon_item_id": 1003,
+          "character_id": 45,
+          "icon_id": 2
+        }
+      ]
+    }
+  ]
+}

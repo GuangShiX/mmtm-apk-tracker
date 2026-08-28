@@ -201,6 +201,22 @@ class AssetCdnTests(unittest.TestCase):
             {target_key: ("icon.bundle", "texture.bundle")},
         )
 
+    def test_resolves_exact_registered_special_player_icon(self):
+        target_key = "CharacterIcon/CHR_000135/CHR_000135_00_em_001"
+        key_data, offsets = encode_keys([target_key])
+        catalog = {
+            "m_KeyDataString": key_data,
+            "m_BucketDataString": encode_buckets([(target_key, [0])], offsets),
+            "m_EntryDataString": encode_entries([(0, -1)]),
+            "m_InternalIds": ["{RuntimePath}/Android/special-icon.bundle"],
+        }
+
+        targets = resolve_critical_catalog_targets(catalog)
+
+        target = targets[("characters", "CHR_000135_00_em_001.png")]
+        self.assertEqual(target.catalog_keys, (target_key,))
+        self.assertEqual(target.bundle_names, ("special-icon.bundle",))
+
     def test_exact_catalog_resolver_requires_every_key(self):
         key_data, offsets = encode_keys(["CharacterIcon/CHR_000150"])
         catalog = {
