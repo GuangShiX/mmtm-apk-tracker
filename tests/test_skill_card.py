@@ -253,15 +253,7 @@ class SkillCardTests(unittest.TestCase):
                 asset_version="asset",
             )
             output = root / "card.png"
-            with patch(
-                "skill_card._font_candidates",
-                return_value=FontSet(
-                    Path(r"C:\Windows\Fonts\arial.ttf"),
-                    Path(r"C:\Windows\Fonts\arialbd.ttf"),
-                    Path(r"C:\Windows\Fonts\times.ttf"),
-                ),
-            ):
-                render_skill_card(payload, assets, output)
+            render_skill_card(payload, assets, output)
 
             with Image.open(output) as rendered:
                 self.assertEqual(rendered.size, (3840, 2160))
@@ -349,15 +341,7 @@ class SkillCardTests(unittest.TestCase):
             )
             output_dir = root / "cards" / "characters"
             output = output_dir / "character-000042-compact-zh-CN.png"
-            with patch(
-                "skill_card._font_candidates",
-                return_value=FontSet(
-                    Path(r"C:\Windows\Fonts\arial.ttf"),
-                    Path(r"C:\Windows\Fonts\arialbd.ttf"),
-                    Path(r"C:\Windows\Fonts\times.ttf"),
-                ),
-            ):
-                render_skill_card(payload, assets, output, mode="compact")
+            render_skill_card(payload, assets, output, mode="compact")
 
             with Image.open(output) as rendered:
                 self.assertEqual(rendered.size, (COMPACT_WIDTH, COMPACT_HEIGHT))
