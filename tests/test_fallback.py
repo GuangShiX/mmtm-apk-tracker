@@ -76,7 +76,7 @@ def create_version(root: Path, version="1.2.3") -> Path:
         else:
             add(name, "ui")
     for request in ASSET_REQUEST_REGISTRY.assets:
-        if request.category != "ui":
+        if request.category != "ui" and request.name != "CHR_000001_00_s.png":
             add(request.name, request.category)
     connection.commit()
     connection.close()
@@ -89,7 +89,7 @@ class FallbackRepositoryTests(unittest.TestCase):
         self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
         self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
         self.assertEqual(len(UI_ASSET_NAMES), 86)
-        self.assertEqual(len(ASSET_REQUEST_REGISTRY.assets), 100)
+        self.assertEqual(len(ASSET_REQUEST_REGISTRY.assets), 219)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
         self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
 
@@ -107,7 +107,7 @@ class FallbackRepositoryTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                manifest["asset_count"], len(ASSET_REQUEST_REGISTRY.assets) + 5
+                manifest["asset_count"], len(ASSET_REQUEST_REGISTRY.assets) + 4
             )
             self.assertEqual(manifest["request_registry_status"], "complete")
             self.assertEqual(

@@ -113,6 +113,8 @@ def _category(name: str) -> str | None:
         return requested.category
     if re.fullmatch(r"CHR_\d{6}_\d{2}_s\.png", name, re.IGNORECASE):
         return "characters"
+    if re.fullmatch(r"CHR_\d{6}_\d{2}_em_\d{3}\.png", name, re.IGNORECASE):
+        return "characters"
     if re.fullmatch(r"ENE_\d{6}\.png", name, re.IGNORECASE):
         return "enemies"
     if re.fullmatch(r"EQP_\d{6}\.png", name, re.IGNORECASE):

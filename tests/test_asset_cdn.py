@@ -201,7 +201,7 @@ class AssetCdnTests(unittest.TestCase):
             {target_key: ("icon.bundle", "texture.bundle")},
         )
 
-    def test_resolves_exact_registered_special_player_icon(self):
+    def test_discovers_special_player_icon_from_catalog_pattern(self):
         target_key = "CharacterIcon/CHR_000135/CHR_000135_00_em_001"
         key_data, offsets = encode_keys([target_key])
         catalog = {

@@ -1,6 +1,6 @@
 # 官方游戏美术资产按需补全工作流
 
-本工作流适用于 Helper、React 前端及后续项目需要新增 MementoMori 官方头像、图标、边框、地图或其他游戏美术时。目标不是镜像完整游戏资源，而是维护一套**有消费者、有官方身份证据、可重复生成、可验收**的轻量资产仓库。
+本工作流适用于 Helper、React 前端及后续项目需要新增 MementoMori 官方头像、图标、边框、地图或其他游戏美术时。目标不是镜像完整游戏资源，而是维护一套**有消费者、有官方身份证据、可重复生成、可验收**的轻量资产仓库。玩家可选择头像是明确例外：其单文件很小、运行时会任意切换，因此按当前 Master 保留完整库存。
 
 ## 仓库职责
 
@@ -8,7 +8,7 @@
 - `mmtm-assets-fallback`：由 tracker 生成的发布结果；`assets/`、`manifest.json`、`latest.json` 不手工编辑。
 - Helper / React：只消费清单中需要的稳定路径，并按 `sha256` 缓存；项目派生图、截图和生成式素材不反向冒充官方资产。
 
-需求清单位于 `config/official_asset_requests.json`。同一资源可以属于多个需求组，但最终只发布一份规范文件。
+需求清单位于 `config/official_asset_requests.json`。完整玩家头像库存位于自动生成的 `config/player_avatar_inventory.json`，由 `CharacterMB` 与 `SpecialIconItemMB` 产生；同一资源可以属于多个需求组，但最终只发布一份规范文件。
 
 ## 头像消费语义（强制）
 
@@ -24,7 +24,13 @@
 
 ### 1. 登记需求
 
-每次只登记当前功能实际需要的精确文件，不使用宽泛正则批量收录整类美术。每组必须写明：
+默认只登记当前功能实际需要的精确文件，不使用宽泛正则收录大尺寸或无消费者的整类美术。以下紧凑、通用且高复用的类别持续保留完整集合：
+
+- 当前 `CharacterMB` 的普通玩家头像；
+- 当前 `SpecialIconItemMB` 的全部可兑换差分玩家头像；
+- 官方包内符合规范命名的角色小头像（含魔女化差分）、敌人、装备、物品和符石小图标。
+
+其他资产组必须写明：
 
 - 稳定 `id`；
 - `category`、`kind` 和交付位置；
@@ -32,7 +38,7 @@
 - 业务原因；
 - 精确文件名；可用时同时登记精确 Addressables key。
 
-差分玩家头像还必须登记 `special_icon_item_id`、`character_id`、`icon_id`，并引用核验过的 `SpecialIconItemMB` 版本。文件名和 Addressables key 由角色 ID 与 Icon ID 生成，不能直接拿道具 ID 拼接。
+玩家头像库存必须保留 Master 版本、Book SHA-256 和记录数。差分头像的 `special_icon_item_id`、`character_id`、`icon_id` 由 `SpecialIconItemMB` 自动同步；文件名和 Addressables key 由角色 ID 与 Icon ID 生成，不能直接拿道具 ID 拼接。
 
 ### 2. 证明官方身份
 
@@ -48,11 +54,17 @@
 ### 3. 校验清单
 
 ```bash
+python asset_requests.py sync-player-avatar-inventory \
+  --master-dir <MasterBook目录> \
+  --master-version <masterVersion>
+python asset_requests.py verify-player-avatar-inventory \
+  --master-dir <MasterBook目录> \
+  --master-version <masterVersion>
 python asset_requests.py list
 python -m unittest discover -s tests -v
 ```
 
-加载器会拒绝重复大小写、非法路径、不完整消费者信息，以及差分头像文件名、Addressables key 与 Master 映射不一致等情况。
+计划任务每 6 小时运行一次 `sync-player-avatar-inventory --auto-update`。只有 `CharacterMB` 或 `SpecialIconItemMB` 实际变化时才提交库存；资产仓库的计划任务随后按新清单补齐文件。加载器会拒绝重复大小写、非法路径、不完整消费者信息，以及普通/差分头像文件名、Addressables key 与 Master 映射不一致等情况。
 
 ### 4. 生成资产仓库
 
@@ -63,7 +75,7 @@ python fallback.py \
   --repository GuangShiX/mmtm-assets-fallback
 ```
 
-更新键不仅包含 `appVersion` 和 `assetVersion`，还包含需求清单的 SHA-256：
+更新键不仅包含 `appVersion` 和 `assetVersion`，还包含需求清单及玩家头像库存内容共同计算的 SHA-256：
 
 - 游戏版本变化：重新下载官方 APK 并扫描基础包；
 - 需求清单变化：即使游戏版本没变，也重新扫描基础包；
@@ -84,7 +96,7 @@ python asset_requests.py verify-repository --repository <mmtm-assets-fallback>
 - 每个 manifest 条目的文件大小和 SHA-256 与磁盘一致；
 - 文件是可解码 PNG 且尺寸有效；
 - 每个登记资产保留 `source_resource_key` 或 `source_catalog_keys` 来源证据；
-- 差分头像最小边至少 64 px、宽高比在 0.9–1.1，并输出实际尺寸供 UI 复核；官方 Sprite 允许存在少量透明边缘裁切差异，消费端统一使用居中 `cover` 裁切。
+- 普通与差分玩家头像最小边至少 64 px、宽高比在 0.9–1.1，并输出实际尺寸供 UI 复核；官方 Sprite 允许存在少量透明边缘裁切差异，消费端统一使用居中 `cover` 裁切。
 
 消费端还需在真实桌面尺寸复核最终展示。头像类至少检查列表实际尺寸、裁切、透明边缘、占位回退和多账号数据绑定；地图等大图检查构图和缩放，不用派生截图替代仓库原图。
 
@@ -94,11 +106,12 @@ tracker 规则、生成后的资产仓库、消费端同步分别检查工作树
 
 ## 本次基线
 
-当前需求清单包含四组：
+当前强制需求清单包含四组，并另有一条完整差分头像发现规则：
 
 - 21 个头像合成公共 UI；
 - 58 个角色工作台 Prefab 依赖（与上一组有 9 个复用项）；
 - 16 个常用玩法 UI 原始 Sprite；
-- 14 个当前账号快照实际出现的差分玩家头像。
+- 133 个 `CharacterMB` 普通玩家头像；
+- 当前官方包和 catalog 中实际存在、且能回映到 `SpecialIconItemMB` 的全部差分玩家头像。
 
-去重后共 100 个强制验收资产：86 个 UI、14 个差分头像。普通角色头像、敌人、装备、符石和物品仍由既有精确命名规则按官方包维护，不需要逐个登记。
+当前去重后共 219 个强制验收资产：86 个 UI、133 个普通玩家头像。`SpecialIconItemMB` 的全部声明保留在库存中，但只有能从当前基础包或 catalog 解析到官方文件的记录才发布；当前为 303 条声明、128 个真实差分 PNG、175 条无文件预留记录。除此之外，官方包中符合规范命名的角色小头像（包括 `_01_s` 魔女化差分）、敌人、装备、符石和物品仍由既有精确命名规则完整维护，不需要逐个登记；大地图和其他大尺寸图只按明确消费者登记。

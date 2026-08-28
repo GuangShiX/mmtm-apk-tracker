@@ -67,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows_task.ps1 -Unins
 
 ## GitHub 轻量数据自动更新
 
-公开数据仓库：[GuangShiX/mmtm-assets-fallback](https://github.com/GuangShiX/mmtm-assets-fallback)。它保存角色小头像、敌人、装备、符石、物品、头像合成公共边框、已锁定页面的 Prefab Sprite 依赖，以及从官方 Master 解包的角色技能。图片协议见 [docs/github-fallback.md](docs/github-fallback.md)。
+公开数据仓库：[GuangShiX/mmtm-assets-fallback](https://github.com/GuangShiX/mmtm-assets-fallback)。它保存当前 Master 的完整普通/可兑换玩家头像库存，以及体积小且高复用的角色、敌人、装备、符石、物品图标、头像合成公共边框、已锁定页面的 Prefab Sprite 依赖和角色技能。图片协议见 [docs/github-fallback.md](docs/github-fallback.md)。
 
 ```bash
 # 查看官方应用版本、资源版本和 Master 版本
@@ -77,6 +77,7 @@ python fallback.py --remote-info
 python fallback.py --auto-update --output fallback_dist
 
 # 查看按需资产登记摘要并验收生成结果
+python asset_requests.py sync-player-avatar-inventory --auto-update
 python asset_requests.py list
 python asset_requests.py verify-repository --repository fallback_dist
 
@@ -94,7 +95,7 @@ python fallback.py --version 4.18.0 --output fallback_dist
 
 1. `appVersion` 变化时下载一次官方 APK，扫描全部 Bundle 但只导出关键图片；大文件断线重试会保留临时文件并通过 HTTP Range 续传。
 2. `assetVersion` 变化时解析官方 Addressables catalog，只下载新增或内容哈希变化的关键图片 Bundle。
-3. `config/official_asset_requests.json` 的 SHA-256 变化时，即使游戏版本不变也重新扫描基础包，再精确合并清单中可由 Addressables 补齐的素材。
+3. `config/official_asset_requests.json` 或 `config/player_avatar_inventory.json` 的合并 SHA-256 变化时，即使游戏版本不变也重新扫描基础包，再精确合并清单中可由 Addressables 补齐的素材。
 
 这能覆盖“不更新 APK、只通过游戏资源热更新发布新角色”的情况。图片 URL 始终使用 `main/assets/...` 固定路径，不带游戏版本；`manifest.json` 为每张 PNG 提供 SHA-256，消费端下载后应校验并保存到本地缓存。
 

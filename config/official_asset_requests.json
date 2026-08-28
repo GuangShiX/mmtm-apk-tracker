@@ -4,7 +4,7 @@
   "policy": {
     "owner": "mmtm-apk-tracker",
     "generated_repository": "GuangShiX/mmtm-assets-fallback",
-    "rule": "Register exact official assets only when a consumer needs them; never bulk-publish the full game art catalog."
+    "rule": "Register exact official assets when a consumer needs them. Keep the complete compact player-avatar inventory and canonical small-icon families; never bulk-publish unrelated full-resolution game art."
   },
   "groups": [
     {
@@ -142,120 +142,19 @@
       ]
     },
     {
-      "id": "account-special-player-icons-2026-08-28",
+      "id": "all-standard-player-icons",
       "category": "characters",
-      "kind": "special-player-icon",
+      "kind": "standard-player-icon",
       "delivery": "package-or-addressables",
       "consumers": [
-        "mementomori-helper-master:account-list-avatar",
-        "mementomori-helper-web:account-list-avatar"
+        "mementomori-helper-master:player-avatar",
+        "mementomori-helper-web:player-avatar"
       ],
-      "reason": "Special/redeemable player icons observed in current account snapshots; required to avoid placeholder avatars.",
-      "evidence": {
-        "master_book": "SpecialIconItemMB",
-        "verified_master_version": "1787808602106",
-        "verified_on": "2026-08-28"
-      },
-      "assets": [
-        {
-          "name": "CHR_000042_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000042/CHR_000042_00_em_001",
-          "special_icon_item_id": 42,
-          "character_id": 42,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000065_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000065/CHR_000065_00_em_001",
-          "special_icon_item_id": 65,
-          "character_id": 65,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000068_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000068/CHR_000068_00_em_001",
-          "special_icon_item_id": 68,
-          "character_id": 68,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000069_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000069/CHR_000069_00_em_001",
-          "special_icon_item_id": 69,
-          "character_id": 69,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000071_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000071/CHR_000071_00_em_001",
-          "special_icon_item_id": 71,
-          "character_id": 71,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000075_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000075/CHR_000075_00_em_001",
-          "special_icon_item_id": 75,
-          "character_id": 75,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000076_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000076/CHR_000076_00_em_001",
-          "special_icon_item_id": 76,
-          "character_id": 76,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000078_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000078/CHR_000078_00_em_001",
-          "special_icon_item_id": 78,
-          "character_id": 78,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000089_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000089/CHR_000089_00_em_001",
-          "special_icon_item_id": 89,
-          "character_id": 89,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000101_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000101/CHR_000101_00_em_001",
-          "special_icon_item_id": 101,
-          "character_id": 101,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000102_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000102/CHR_000102_00_em_001",
-          "special_icon_item_id": 102,
-          "character_id": 102,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000129_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000129/CHR_000129_00_em_001",
-          "special_icon_item_id": 129,
-          "character_id": 129,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000135_00_em_001.png",
-          "addressable_key": "CharacterIcon/CHR_000135/CHR_000135_00_em_001",
-          "special_icon_item_id": 135,
-          "character_id": 135,
-          "icon_id": 1
-        },
-        {
-          "name": "CHR_000045_00_em_002.png",
-          "addressable_key": "CharacterIcon/CHR_000045/CHR_000045_00_em_002",
-          "special_icon_item_id": 1003,
-          "character_id": 45,
-          "icon_id": 2
-        }
-      ]
+      "reason": "Complete compact ordinary player-avatar inventory derived from CharacterMB, retained so every official selectable portrait remains available after an account switches avatars.",
+      "inventory": {
+        "file": "player_avatar_inventory.json",
+        "section": "standard_player_icons"
+      }
     }
   ]
 }

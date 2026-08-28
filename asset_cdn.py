@@ -367,6 +367,10 @@ def _critical_catalog_name(key: str) -> tuple[str, str] | None:
         return requested
     patterns = (
         ("characters", r"CharacterIcon/CHR_\d{6}/(CHR_\d{6}_\d{2}_s)"),
+        (
+            "characters",
+            r"CharacterIcon/CHR_\d{6}/(CHR_\d{6}_\d{2}_em_\d{3})",
+        ),
         ("enemies", r"Icon/Enemy/(ENE_\d{6})"),
         ("equipment", r"Icon/Equipment/(EQP_\d{6})"),
         ("spheres", r"Icon/Sphere/(SPH_\d{4})"),
