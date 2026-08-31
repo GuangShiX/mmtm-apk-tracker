@@ -20,6 +20,7 @@ from skill_card import (
     _font_collection_index,
     _compact_skill_text,
     _compact_skill_records,
+    _compact_identity_copy,
     _compact_weapon_effect_rows,
     _card_manifest_key,
     _level_label,
@@ -154,6 +155,19 @@ class SkillCardTests(unittest.TestCase):
             self.assertEqual(
                 [path.name for path in paths], ["000007.json", "000003.json"]
             )
+
+    def test_compact_identity_includes_element_and_official_japanese_subtitle(self):
+        character = {
+            "id": 151,
+            "element_type": 5,
+            "names": {"zh-CN": "福尔蒂娜", "ja-JP": "フォルティナ"},
+            "subtitles": {"zh-CN": "黄昏之约", "ja-JP": "黄昏の約束"},
+        }
+
+        self.assertEqual(
+            _compact_identity_copy(character, "zh-CN"),
+            ("福尔蒂娜", "黄昏之约【黄昏の約束】", "天"),
+        )
 
     def test_compact_text_merges_all_numeric_upgrades_and_removes_dialogue(self):
         skill = {
