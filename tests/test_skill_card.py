@@ -20,6 +20,7 @@ from skill_card import (
     _font_collection_index,
     _compact_skill_text,
     _compact_skill_records,
+    _compact_weapon_effect_rows,
     _card_manifest_key,
     _level_label,
     _minify_compact_text,
@@ -204,6 +205,58 @@ class SkillCardTests(unittest.TestCase):
             _minify_compact_text(source),
             "战斗开始时，强化普通攻击，承受伤害-40%、最大生命值+100%（无法解除），持续10回合。"
             "若恢复前目标生命值≥50%且附带控制效果，解除其所有控制效果。",
+        )
+
+    def test_compact_text_combines_matching_defense_buffs(self):
+        source = (
+            "福尔蒂娜使自身及速度高于自身的友军增加防御力，"
+            "增幅为福尔蒂娜防御力×50%，效果持续3回合（无法被解除）。"
+            "再随机对5名敌人造成攻击力×480%的物理伤害。"
+            "发动攻击前，福尔蒂娜使自身及速度高于自身的友军额外增加物理防御力与魔法防御力，"
+            "增幅分别为福尔蒂娜物理防御力×50%及福尔蒂娜魔法防御力×50%，"
+            "效果持续3回合（无法被解除）。"
+        )
+
+        self.assertEqual(
+            _minify_compact_text(source),
+            "攻击前，使自身及速度高于自身的友军防御力、物防、魔防 + "
+            "自身防御力、物防、魔防×50%，持续3回合（无法解除）。"
+            "随后随机攻击5名敌人，造成攻击力×480%的物理伤害。",
+        )
+
+    def test_compact_weapon_effect_rows_include_standalone_ur_effect(self):
+        weapon = {
+            "skill_effects": [
+                {
+                    "equipment_rarity_flags": 128,
+                    "descriptions": {"zh-CN": "强化技能一。"},
+                },
+                {
+                    "equipment_rarity_flags": 256,
+                    "descriptions": {
+                        "zh-CN": "战斗开始时，福尔蒂娜获得2层「多重屏障」（无法被解除）。"
+                        "当她受到最大生命值×10%以上的伤害时，消耗1层屏障来抵消该伤害。"
+                    },
+                },
+                {
+                    "equipment_rarity_flags": 512,
+                    "descriptions": {
+                        "zh-CN": "强化神意的天平，造成的物理伤害提升为攻击力×610%。"
+                    },
+                },
+            ]
+        }
+
+        self.assertEqual(
+            _compact_weapon_effect_rows(weapon, "zh-CN"),
+            [
+                (
+                    "UR专效果",
+                    "战斗开始时，获得2层「多重屏障」（无法解除）。"
+                    "受到的伤害达到最大生命值的10%以上时，消耗1层并抵消该伤害。",
+                ),
+                ("LR专效果", "造成的物理伤害提升为攻击力×610%。"),
+            ],
         )
 
     def test_compact_renderer_waits_for_complete_official_localization(self):

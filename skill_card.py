@@ -36,7 +36,7 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v3"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v4"
 COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
@@ -916,13 +916,41 @@ def _minify_compact_text(text: str) -> str:
     )
     text = re.sub(
         r"使自身及速度高于自身的友军增加防御力，增幅为[^，。]+防御力×([\d.]+)%，效果持续(\d+)回合",
-        r"使自身及速度高于自身的友军防御力+自身防御力×\1%，持续\2回合",
+        r"使自身和速度高于自身的友军增加相当于自身防御力\1%的防御力，持续\2回合",
         text,
     )
     text = re.sub(
         r"发动攻击前，[^，。]+使自身及速度高于自身的友军额外增加物理防御力与魔法防御力，"
         r"增幅分别为[^，。]+物理防御力×([\d.]+)%及[^，。]+魔法防御力×([\d.]+)%，效果持续(\d+)回合",
-        r"攻击前，同目标物防+自身物防×\1%、魔防+自身魔防×\2%，持续\3回合",
+        r"攻击前，使上述友军的物防与魔防分别增加相当于自身对应防御力\1%、\2%的数值，持续\3回合",
+        text,
+    )
+
+    def merge_defense_buffs(match: re.Match[str]) -> str:
+        defense, duration, restriction, middle, physical, magic = match.groups()
+        if defense == physical == magic:
+            increase = (
+                "防御力、物防、魔防 + 自身防御力、物防、魔防"
+                f"×{defense}%"
+            )
+        else:
+            increase = (
+                f"防御力 + 自身防御力×{defense}%、"
+                f"物防 + 自身物防×{physical}%、"
+                f"魔防 + 自身魔防×{magic}%"
+            )
+        return (
+            f"攻击前，使自身及速度高于自身的友军{increase}，"
+            f"持续{duration}回合{restriction or ''}。{middle}"
+        )
+
+    text = re.sub(
+        r"使自身和速度高于自身的友军增加相当于自身防御力([\d.]+)%的防御力，"
+        r"持续(\d+)回合(（无法解除）)?。"
+        r"(.*?)"
+        r"攻击前，使上述友军的物防与魔防分别增加相当于自身对应防御力"
+        r"([\d.]+)%、([\d.]+)%的数值，持续\2回合(?:\3)?。",
+        merge_defense_buffs,
         text,
     )
     text = re.sub(r"再随机对(\d+)名敌人造成", r"随后随机攻击\1名敌人，造成", text)
@@ -945,6 +973,51 @@ def _minify_compact_text(text: str) -> str:
         text,
     )
     return text
+
+
+def _compact_weapon_effect_rows(
+    weapon: dict[str, Any], language: str
+) -> list[tuple[str, str]]:
+    effects = [
+        effect
+        for effect in weapon.get("skill_effects") or []
+        if isinstance(effect, dict)
+    ]
+
+    def effect_for(rarity: int, fallback_index: int) -> dict[str, Any] | None:
+        matched = next(
+            (
+                effect
+                for effect in effects
+                if effect.get("equipment_rarity_flags") == rarity
+            ),
+            None,
+        )
+        if matched is not None:
+            return matched
+        return effects[fallback_index] if len(effects) > fallback_index else None
+
+    ur_effect = effect_for(256, 1)
+    lr_effect = effect_for(512, 2)
+    if ur_effect is None or lr_effect is None:
+        return []
+
+    ur_text = _localized(ur_effect.get("descriptions"), language) or "文本缺失"
+    ur_text = re.sub(
+        r"战斗开始时，[^，。]+获得",
+        "战斗开始时，获得",
+        ur_text,
+    )
+    ur_text = re.sub(
+        r"当(?:她|[^，。]{1,12})受到最大生命值×([\d.]+)%以上的伤害时，"
+        r"消耗1层屏障来抵消该伤害",
+        r"受到的伤害达到最大生命值的\1%以上时，消耗1层并抵消该伤害",
+        ur_text,
+    ).replace("无法被解除", "无法解除")
+
+    lr_text = _localized(lr_effect.get("descriptions"), language) or "文本缺失"
+    lr_text = re.sub(r"^强化[^，。]+[，。]", "", lr_text)
+    return [("UR专效果", ur_text), ("LR专效果", lr_text)]
 
 
 def _skill_body_layout(
@@ -1049,6 +1122,9 @@ def _render_compact_skill_card(
     skill_effects = weapon.get("skill_effects") or []
     if len(skill_effects) < 3:
         raise RuntimeError(f"角色 {character['id']} 的专武缺少 LR 专效果")
+    weapon_effect_rows = _compact_weapon_effect_rows(weapon, language)
+    if len(weapon_effect_rows) != 2:
+        raise RuntimeError(f"角色 {character['id']} 的专武缺少 UR 或 LR 专效果")
     arcanas = [item for item in payload.get("arcanas") or [] if isinstance(item, dict)]
     arcana = arcanas[-1] if arcanas else None
 
@@ -1211,8 +1287,8 @@ def _render_compact_skill_card(
                 cursor += line_height
             cursor += paragraph_gap
 
-    # The weapon uses the same 160px icon tier as skills. LR text stays at full
-    # contrast and each semantic sentence starts on its own line.
+    # The weapon uses the same 160px icon tier as skills. UR and LR effects are
+    # separate rows so a standalone UR mechanic cannot disappear into skill copy.
     weapon_top, weapon_bottom = 2690, 3110
     panel(weapon_top, weapon_bottom, (197, 126, 60))
     weapon_icon_x, weapon_icon_y = panel_left + 34, weapon_top + 38
@@ -1255,39 +1331,56 @@ def _render_compact_skill_card(
         font=fitted_face(stat_text, 44, 34, panel_right - weapon_copy_x - 38),
         fill=(255, 224, 165, 255),
     )
-    lr_label = "LR专效果"
-    label_left, label_top = weapon_copy_x, weapon_top + 220
-    label_width, label_height = 188, 66
-    draw.rounded_rectangle(
-        (label_left, label_top, label_left + label_width, label_top + label_height),
-        radius=13,
-        fill=(192, 117, 48, 255),
-    )
-    lr_label_face = _font(fonts, 32, medium=True)
-    draw.text(
-        (
-            label_left + (label_width - draw.textlength(lr_label, font=lr_label_face)) / 2,
-            label_top + 11,
-        ),
-        lr_label,
-        font=lr_label_face,
-        fill=(255, 249, 237, 255),
-    )
-    lr_text = _localized(skill_effects[2].get("descriptions"), language) or "文本缺失"
-    lr_text = re.sub(r"^强化[^，。]+[，。]", "", lr_text)
-    lr_body = _font(fonts, 46)
-    lr_x = label_left + label_width + 30
-    lr_width = panel_right - lr_x - 36
-    lr_cursor = label_top + 3
-    for sentence in _sentences(lr_text):
-        for line in _wrap(draw, sentence, lr_body, lr_width):
+    label_left, label_width, label_height = weapon_copy_x, 188, 58
+    effect_x = label_left + label_width + 30
+    effect_width = panel_right - effect_x - 36
+    effect_body = _font(fonts, 38)
+    effect_line_height = _line_height(draw, effect_body, gap=7)
+    effect_cursor = weapon_top + 218
+    effect_colors = ((143, 91, 157), (192, 117, 48))
+    for (label, effect_text), label_color in zip(
+        weapon_effect_rows, effect_colors
+    ):
+        lines = [
+            line
+            for sentence in _sentences(effect_text)
+            for line in _wrap(draw, sentence, effect_body, effect_width)
+        ]
+        row_height = max(label_height, len(lines) * effect_line_height)
+        label_top = effect_cursor + (row_height - label_height) // 2
+        draw.rounded_rectangle(
+            (
+                label_left,
+                label_top,
+                label_left + label_width,
+                label_top + label_height,
+            ),
+            radius=13,
+            fill=(*label_color, 255),
+        )
+        label_face = _font(fonts, 30, medium=True)
+        draw.text(
+            (
+                label_left
+                + (label_width - draw.textlength(label, font=label_face)) / 2,
+                label_top + 9,
+            ),
+            label,
+            font=label_face,
+            fill=(255, 249, 237, 255),
+        )
+        text_cursor = effect_cursor
+        for line in lines:
             draw.text(
-                (lr_x, lr_cursor),
+                (effect_x, text_cursor),
                 line,
-                font=lr_body,
+                font=effect_body,
                 fill=(244, 241, 233, 255),
             )
-            lr_cursor += _line_height(draw, lr_body, gap=9)
+            text_cursor += effect_line_height
+        effect_cursor += row_height + 8
+    if effect_cursor > weapon_bottom - 18:
+        raise RuntimeError("专武 UR/LR 效果无法在省流模板中清晰排入")
 
     # Arcana closes the card: LR-rank effects first, then large unlock avatars
     # in up to two rows so the names remain readable.
