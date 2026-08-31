@@ -36,7 +36,7 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v6"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v7"
 COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
@@ -183,18 +183,9 @@ def _compact_identity_copy(
     character: dict[str, Any], language: str
 ) -> tuple[str, str, str]:
     title = _localized(character.get("names"), language) or str(character.get("id"))
-    subtitles = character.get("subtitles")
-    subtitle = _localized(subtitles, language) or ""
-    japanese_subtitle = (
-        subtitles.get("ja-JP") if isinstance(subtitles, dict) else None
-    )
-    if (
-        language != "ja-JP"
-        and isinstance(japanese_subtitle, str)
-        and japanese_subtitle.strip()
-        and japanese_subtitle.strip() != subtitle
-    ):
-        subtitle = f"{subtitle}【{japanese_subtitle.strip()}】"
+    subtitle = _localized(character.get("subtitles"), language) or ""
+    if subtitle:
+        subtitle = f"【{subtitle}】"
     element = ELEMENT_NAMES.get(
         character.get("element_type"), str(character.get("element_type", "?"))
     )

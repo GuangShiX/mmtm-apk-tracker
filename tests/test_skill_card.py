@@ -156,7 +156,7 @@ class SkillCardTests(unittest.TestCase):
                 [path.name for path in paths], ["000007.json", "000003.json"]
             )
 
-    def test_compact_identity_includes_element_and_official_japanese_subtitle(self):
+    def test_compact_identity_wraps_localized_subtitle_and_includes_element(self):
         character = {
             "id": 151,
             "element_type": 5,
@@ -166,7 +166,7 @@ class SkillCardTests(unittest.TestCase):
 
         self.assertEqual(
             _compact_identity_copy(character, "zh-CN"),
-            ("福尔蒂娜", "黄昏之约【黄昏の約束】", "天"),
+            ("福尔蒂娜", "【黄昏之约】", "天"),
         )
 
     def test_compact_text_merges_all_numeric_upgrades_and_removes_dialogue(self):
