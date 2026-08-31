@@ -36,7 +36,7 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v7"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v8"
 COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
@@ -945,10 +945,7 @@ def _minify_compact_text(text: str) -> str:
     def merge_defense_buffs(match: re.Match[str]) -> str:
         defense, duration, restriction, middle, physical, magic = match.groups()
         if defense == physical == magic:
-            increase = (
-                "防御力、物防、魔防 + 自身防御力、物防、魔防"
-                f"×{defense}%"
-            )
+            increase = f"三防增加自身对应三防×{defense}%"
         else:
             increase = (
                 f"防御力 + 自身防御力×{defense}%、"
