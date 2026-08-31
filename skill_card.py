@@ -36,21 +36,12 @@ COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
-COMPACT_TEMPLATE_VERSION = "portrait-compact-v5"
+COMPACT_TEMPLATE_VERSION = "portrait-compact-v6"
 COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
 LEFT_WIDTH = 1380
 ELEMENT_NAMES = {0: "无", 1: "蓝", 2: "红", 3: "翠", 4: "黄", 5: "天", 6: "冥"}
-ELEMENT_BADGE_COLORS = {
-    0: (101, 111, 123),
-    1: (58, 115, 178),
-    2: (184, 70, 65),
-    3: (57, 139, 104),
-    4: (190, 148, 53),
-    5: (213, 164, 67),
-    6: (105, 73, 147),
-}
 JOB_NAMES = {0: "未知", 1: "战士", 2: "狙击手", 4: "魔法师"}
 RARITY_LABELS = {128: "Ex1", 256: "Ex2", 512: "Ex3"}
 PARAMETER_NAMES_ZH_CN = {
@@ -97,6 +88,7 @@ class CardAssets:
     asset_version: str
     weapon: Path | None = None
     avatar: Path | None = None
+    element: Path | None = None
     arcana_characters: dict[int, Path] = field(default_factory=dict)
 
 
@@ -478,6 +470,7 @@ def fetch_official_card_assets(
     catalog_path: Path | None = None,
     weapon_icon_id: int | None = None,
     include_avatar: bool = False,
+    element_icon: Path | None = None,
     arcana_character_ids: list[int] | None = None,
     allow_missing: bool = False,
 ) -> CardAssets:
@@ -570,6 +563,7 @@ def fetch_official_card_assets(
         asset_version=info.asset_version,
         weapon=weapon,
         avatar=avatar,
+        element=element_icon,
         arcana_characters=arcana_characters,
     )
 
@@ -1232,31 +1226,18 @@ def _render_compact_skill_card(
         font=fitted_face(subtitle, 56, 34, panel_right - identity_x - 40, serif=True),
         fill=(244, 181, 78, 255),
     )
-    element_type = character.get("element_type")
     element_size = 92
     element_x = identity_x
     element_y = identity_top + 151
-    element_color = ELEMENT_BADGE_COLORS.get(element_type, ELEMENT_BADGE_COLORS[0])
-    draw.rounded_rectangle(
-        (element_x, element_y, element_x + element_size, element_y + element_size),
-        radius=24,
-        fill=(*element_color, 242),
-        outline=(255, 226, 166, 225),
-        width=3,
+    if assets.element is None:
+        raise RuntimeError(
+            f"角色 {character['id']} 缺少官方{element}属性图标"
+        )
+    element_image = Image.open(assets.element).convert("RGBA").resize(
+        (element_size, element_size),
+        Image.Resampling.LANCZOS,
     )
-    element_face = _font(fonts, 48, medium=True)
-    element_bbox = draw.textbbox((0, 0), element, font=element_face)
-    element_width = element_bbox[2] - element_bbox[0]
-    element_height = element_bbox[3] - element_bbox[1]
-    draw.text(
-        (
-            element_x + (element_size - element_width) / 2,
-            element_y + (element_size - element_height) / 2 - element_bbox[1],
-        ),
-        element,
-        font=element_face,
-        fill=(255, 250, 236, 255),
-    )
+    canvas.paste(element_image, (element_x, element_y), element_image)
     title_x = element_x + element_size + 28
     draw.text(
         (title_x, identity_top + 142),
@@ -1900,6 +1881,15 @@ def main() -> int:
                 if args.mode in ("compact", "both") and isinstance(weapon, dict)
                 else None
             )
+            element_type = payload["character"].get("element_type")
+            element_icon = (
+                args.skills_dir.parent
+                / "assets"
+                / "ui"
+                / f"icon_element_{element_type}.png"
+            )
+            if not element_icon.is_file():
+                element_icon = None
             arcana_character_ids = (
                 [
                     int(item.get("id"))
@@ -1918,6 +1908,7 @@ def main() -> int:
                 art_size=args.art_size,
                 weapon_icon_id=weapon_icon_id,
                 include_avatar=args.mode in ("compact", "both"),
+                element_icon=element_icon,
                 arcana_character_ids=arcana_character_ids,
                 allow_missing=args.mode == "compact",
             )

@@ -418,6 +418,7 @@ class SkillCardTests(unittest.TestCase):
                 art=art,
                 avatar=icon,
                 weapon=icon,
+                element=icon,
                 icons={skill_id: icon for skill_id in (42001, 42002, 42003, 42004)},
                 arcana_characters={42: icon},
                 asset_version="asset",
