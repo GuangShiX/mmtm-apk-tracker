@@ -83,7 +83,7 @@ class FontSet:
 
 @dataclass(frozen=True)
 class CardAssets:
-    art: Path
+    art: Path | None
     icons: dict[int, Path]
     asset_version: str
     weapon: Path | None = None
@@ -190,6 +190,46 @@ def _load_payload(path: Path) -> dict[str, Any]:
     if not skills or not all(isinstance(skill.get("id"), int) for skill in skills):
         raise RuntimeError("角色技能 JSON 没有有效技能")
     return payload
+
+
+def _display_skill_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Exclude unnamed exclusive-effect rows that are not real skill slots."""
+    skills = [
+        *(payload.get("active_skills") or []),
+        *(payload.get("passive_skills") or []),
+    ]
+    return [
+        skill
+        for skill in skills
+        if skill.get("name_key") != "*"
+        and (skill.get("master_record") or {}).get("NameKey") != "*"
+    ]
+
+
+def _compact_skill_records(
+    payload: dict[str, Any], language: str
+) -> list[dict[str, Any]]:
+    character = payload.get("character") or {}
+    skills = _display_skill_records(payload)
+    localized = []
+    for skill in skills:
+        names = skill.get("names")
+        name = names.get(language) if isinstance(names, dict) else None
+        levels = skill.get("levels") or []
+        descriptions_complete = bool(levels) and all(
+            isinstance(level.get("descriptions"), dict)
+            and isinstance(level["descriptions"].get(language), str)
+            and bool(level["descriptions"][language].strip())
+            for level in levels
+        )
+        if isinstance(name, str) and name.strip() and descriptions_complete:
+            localized.append(skill)
+    if len(localized) != 4:
+        raise RuntimeError(
+            f"角色 {character.get('id', '?')} 的官方 {language} 技能文本尚未完整，"
+            "暂不生成省流图"
+        )
+    return localized
 
 
 def _sha256(path: Path) -> str:
@@ -408,6 +448,7 @@ def fetch_official_card_assets(
     weapon_icon_id: int | None = None,
     include_avatar: bool = False,
     arcana_character_ids: list[int] | None = None,
+    allow_missing: bool = False,
 ) -> CardAssets:
     if art_size not in {"l", "m", "w"}:
         raise ValueError("art_size 必须是 l、m 或 w")
@@ -425,21 +466,42 @@ def fetch_official_card_assets(
         include_avatar,
         arcana_character_ids,
     )
-    resolved = resolve_catalog_key_bundles(catalog, requested)
+    resolved: dict[str, tuple[str, ...]] = {}
+    for key in requested:
+        try:
+            resolved.update(resolve_catalog_key_bundles(catalog, [key]))
+        except RuntimeError as exc:
+            if not allow_missing:
+                raise
+            print(f"  可选图片暂缺，技能文字继续生成: {key} ({exc})")
     bundle_names = sorted({name for names in resolved.values() for name in names})
     bundles_dir = cache_dir / "bundles"
     missing = [name for name in bundle_names if not (bundles_dir / name).is_file()]
-    if missing:
+    if missing and not allow_missing:
         download_target_bundles(info, missing, bundles_dir)
+    elif missing:
+        for name in missing:
+            try:
+                download_target_bundles(info, [name], bundles_dir)
+            except Exception as exc:
+                print(f"  可选图片 Bundle 暂不可用，技能文字继续生成: {name} ({exc})")
 
     images_dir = cache_dir / "images"
     art_key = next(key for key, asset_id in requested.items() if asset_id is None)
     art_name = art_key.rsplit("/", 1)[-1]
     art = images_dir / f"{art_name}.png"
-    if not art.is_file():
-        _export_key_image(
-            [bundles_dir / name for name in resolved[art_key]], art_name, art
-        )
+    if art_key not in resolved:
+        art = None
+    elif not art.is_file():
+        try:
+            _export_key_image(
+                [bundles_dir / name for name in resolved[art_key]], art_name, art
+            )
+        except (OSError, RuntimeError) as exc:
+            if not allow_missing:
+                raise
+            print(f"  角色立绘暂缺，继续生成文字卡: {art_name} ({exc})")
+            art = None
     icons: dict[int, Path] = {}
     weapon = None
     avatar = None
@@ -447,12 +509,20 @@ def fetch_official_card_assets(
     for key, asset_id in requested.items():
         if asset_id is None:
             continue
+        if key not in resolved:
+            continue
         expected_name = key.rsplit("/", 1)[-1]
         icon = images_dir / f"{expected_name}.png"
         if not icon.is_file():
-            _export_key_image(
-                [bundles_dir / name for name in resolved[key]], expected_name, icon
-            )
+            try:
+                _export_key_image(
+                    [bundles_dir / name for name in resolved[key]], expected_name, icon
+                )
+            except (OSError, RuntimeError) as exc:
+                if not allow_missing:
+                    raise
+                print(f"  可选图片暂缺，技能文字继续生成: {expected_name} ({exc})")
+                continue
         if asset_id == "weapon":
             weapon = icon
         elif asset_id == "avatar":
@@ -633,8 +703,54 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
         core = sentence.rstrip("。！？")
         applied = False
 
-        match = re.search(r"生命值恢复量提升为[^。]*?攻击力×([\d.]+)%", core)
+        match = re.search(
+            r"防御力、物理防御力与魔法防御力增幅分别提升为"
+            r"[^，。]+?防御力×([\d.]+)%、"
+            r"[^，。]+?物理防御力×([\d.]+)%及"
+            r"[^，。]+?魔法防御力×([\d.]+)%",
+            core,
+        )
         if match:
+            defense, physical, magic = match.groups()
+            text, physical_count = re.subn(
+                r"物理防御力×[\d.]+%", f"物理防御力×{physical}%", text
+            )
+            text, magic_count = re.subn(
+                r"魔法防御力×[\d.]+%", f"魔法防御力×{magic}%", text
+            )
+            text, defense_count = re.subn(
+                r"(?<!物理)(?<!魔法)防御力×[\d.]+%",
+                f"防御力×{defense}%",
+                text,
+            )
+            applied = bool(physical_count or magic_count or defense_count)
+
+        if not applied:
+            match = re.search(
+                r"攻击力增幅提升为[^，。]+?攻击力×([\d.]+)%", core
+            )
+            if match:
+                value = match.group(1)
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: "增加攻击力" in item and "攻击力×" in item,
+                    r"(攻击力×)[\d.]+%",
+                    rf"\g<1>{value}%",
+                )
+
+        if not applied:
+            match = re.search(r"伤害阻绝量提升为([\d.]+)%", core)
+            if match:
+                value = match.group(1)
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: "阻绝" in item and "伤害" in item,
+                    r"阻绝[\d.]+%伤害",
+                    f"阻绝{value}%伤害",
+                )
+
+        match = re.search(r"生命值恢复量提升为[^。]*?攻击力×([\d.]+)%", core)
+        if not applied and match:
             value = match.group(1)
             text, applied = _replace_sentence(
                 text,
@@ -792,6 +908,42 @@ def _minify_compact_text(text: str) -> str:
         r"\1附带\2时可发动",
         text,
     )
+    text = text.replace("使自己与速度高于自己的其他友军", "使自身及速度高于自身的友军")
+    text = re.sub(
+        r"(^|。)[^，。]{1,12}使自身及速度高于自身的友军",
+        r"\1使自身及速度高于自身的友军",
+        text,
+    )
+    text = re.sub(
+        r"使自身及速度高于自身的友军增加防御力，增幅为[^，。]+防御力×([\d.]+)%，效果持续(\d+)回合",
+        r"使自身及速度高于自身的友军防御力+自身防御力×\1%，持续\2回合",
+        text,
+    )
+    text = re.sub(
+        r"发动攻击前，[^，。]+使自身及速度高于自身的友军额外增加物理防御力与魔法防御力，"
+        r"增幅分别为[^，。]+物理防御力×([\d.]+)%及[^，。]+魔法防御力×([\d.]+)%，效果持续(\d+)回合",
+        r"攻击前，同目标物防+自身物防×\1%、魔防+自身魔防×\2%，持续\3回合",
+        text,
+    )
+    text = re.sub(r"再随机对(\d+)名敌人造成", r"随后随机攻击\1名敌人，造成", text)
+    text = text.replace("如果队伍中包含的角色属性为2种以下", "若队伍属性≤2种")
+    text = re.sub(r"[^，。]{1,12}使全体友军增加([\d.]+)%速度", r"全体友军速度+\1%", text)
+    text = re.sub(
+        r"第2回合开始时，[^，。]+使自己与攻击力最高的(\d+)名其他友军额外增加攻击力，"
+        r"增幅为[^，。]+攻击力×([\d.]+)%，效果持续(\d+)回合",
+        r"第2回合开始，自身及攻击力最高的\1名友军攻击力+自身攻击力×\2%，持续\3回合",
+        text,
+    )
+    text = re.sub(
+        r"第1回合行动开始时，[^，。]+获得(「[^」]+」)状态，代其他友军承受([\d.]+)%攻击伤害，效果持续(\d+)回合",
+        r"第1回合行动时，获得\1\3回合，代友军承受\2%攻击伤害",
+        text,
+    )
+    text = re.sub(
+        r"如果[^，。]+在身上附带此技能附加的(「[^」]+」)状态时受到攻击，阻绝([\d.]+)%伤害",
+        r"附带\1时受到攻击，阻绝\2%伤害",
+        text,
+    )
     return text
 
 
@@ -878,15 +1030,8 @@ def _render_compact_skill_card(
     language: str,
 ) -> Path:
     character = payload["character"]
-    if payload.get("localization_complete") is False:
-        raise RuntimeError(
-            f"角色 {character['id']} 的官方 {language} 技能文本尚未完整，暂不生成省流图"
-        )
     fonts = _font_candidates()
-    raw_skills = [
-        *(payload.get("active_skills") or []),
-        *(payload.get("passive_skills") or []),
-    ]
+    raw_skills = _compact_skill_records(payload, language)
     skills = [_skill_view(skill, language) for skill in raw_skills]
     for view, raw in zip(skills, raw_skills):
         view["compact_text"] = _compact_skill_text(raw, language)
@@ -961,10 +1106,11 @@ def _render_compact_skill_card(
     # weapon icon, and no ID or badge is drawn over it.
     identity_top, identity_bottom = 60, 390
     panel(identity_top, identity_bottom, (197, 126, 60))
-    avatar_source = assets.avatar or assets.art
+    avatar_source = assets.avatar
     avatar_x = panel_left + 30
     avatar_y = identity_top + 30
-    paste_rounded(avatar_source, avatar_x, avatar_y, avatar_size, 34)
+    if avatar_source is not None:
+        paste_rounded(avatar_source, avatar_x, avatar_y, avatar_size, 34)
     draw.rounded_rectangle(
         (avatar_x, avatar_y, avatar_x + avatar_size, avatar_y + avatar_size),
         radius=34,
@@ -1018,9 +1164,8 @@ def _render_compact_skill_card(
             fill=(35, 50, 66, 255),
         )
         icon_path = assets.icons.get(skill["id"])
-        if icon_path is None:
-            raise RuntimeError(f"缺少技能图标: {skill['id']}")
-        paste_rounded(icon_path, icon_x, icon_y, icon_size, 28)
+        if icon_path is not None:
+            paste_rounded(icon_path, icon_x, icon_y, icon_size, 28)
 
         heading_x = icon_x + icon_size + 42
         heading_width = panel_right - heading_x - 38
@@ -1257,17 +1402,6 @@ def _render_compact_skill_card(
                 outline=(106, 145, 170, 255),
                 width=3,
             )
-            question_face = _font(fonts, 76, medium=True)
-            question_width = draw.textlength("?", font=question_face)
-            draw.text(
-                (
-                    tile_x + (required_avatar_size - question_width) / 2,
-                    tile_y + 22,
-                ),
-                "?",
-                font=question_face,
-                fill=(203, 220, 230, 255),
-            )
         required_name = (
             _localized(required.get("names"), language)
             if isinstance(required, dict)
@@ -1307,7 +1441,7 @@ def render_skill_card(
     character = payload["character"]
     skills = [
         _skill_view(skill, language)
-        for skill in [*(payload.get("active_skills") or []), *(payload.get("passive_skills") or [])]
+        for skill in _display_skill_records(payload)
     ]
     if len(skills) > 4:
         raise RuntimeError(
@@ -1606,10 +1740,11 @@ def main() -> int:
         for source in sources:
             payload = _load_payload(source)
             character_id = payload["character"]["id"]
-            skills = [
-                *(payload.get("active_skills") or []),
-                *(payload.get("passive_skills") or []),
-            ]
+            skills = (
+                _compact_skill_records(payload, args.language)
+                if args.mode in ("compact", "both")
+                else _display_skill_records(payload)
+            )
             weapon = payload.get("exclusive_weapon")
             weapon_icon_id = (
                 weapon.get("icon_id")
@@ -1635,6 +1770,7 @@ def main() -> int:
                 weapon_icon_id=weapon_icon_id,
                 include_avatar=args.mode in ("compact", "both"),
                 arcana_character_ids=arcana_character_ids,
+                allow_missing=args.mode == "compact",
             )
             modes = ("full", "compact") if args.mode == "both" else (args.mode,)
             for mode in modes:

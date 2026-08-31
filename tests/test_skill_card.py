@@ -19,6 +19,7 @@ from skill_card import (
     _font,
     _font_collection_index,
     _compact_skill_text,
+    _compact_skill_records,
     _card_manifest_key,
     _level_label,
     _minify_compact_text,
@@ -223,6 +224,33 @@ class SkillCardTests(unittest.TestCase):
                 Path("unused.png"),
                 mode="compact",
             )
+
+    def test_compact_skills_exclude_unnamed_exclusive_effect_row(self):
+        payload = {
+            "character": {"id": 151},
+            "active_skills": [
+                _skill(151001, "active", "主动一"),
+                _skill(151002, "active", "主动二"),
+            ],
+            "passive_skills": [
+                _skill(151003, "passive", "被动一"),
+                _skill(151004, "passive", "被动二"),
+                {
+                    **_skill(151005, "passive", "unused"),
+                    "name_key": "*",
+                    "names": {"zh-CN": None},
+                    "master_record": {"NameKey": "*"},
+                },
+            ],
+            "localization_complete": False,
+        }
+
+        skills = _compact_skill_records(payload, "zh-CN")
+
+        self.assertEqual(
+            [skill["id"] for skill in skills],
+            [151001, 151002, 151003, 151004],
+        )
 
     def test_renderer_accepts_master_json_without_character_specific_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
