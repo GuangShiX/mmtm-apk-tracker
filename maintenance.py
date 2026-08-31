@@ -7,19 +7,60 @@ import html
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 import msgpack
+import requests
 
-from asset_cdn import AUTH_URL, _request_with_retries, get_official_app_version
-
+VARS_URL = "https://mememori-game.com/apps/vars.js"
+AUTH_URL = "https://prd1-auth.mememori-boi.com/api/auth/getDataUri"
 NOTICE_URL = "https://prd1-auth.mememori-boi.com/api/notice/getNoticeInfoList"
 FIXED_JST = timezone(timedelta(hours=9))
 ALL = 0
 GOOGLE_PLAY_STORE = 2
+
+
+def _request_with_retries(
+    method: str,
+    url: str,
+    *,
+    retries: int = 3,
+    timeout: int = 30,
+    **kwargs: Any,
+) -> requests.Response:
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.request(method, url, timeout=timeout, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(attempt * 2)
+    raise RuntimeError(f"request failed: {url}: {last_error}") from last_error
+
+
+def get_official_app_version() -> str:
+    response = _request_with_retries(
+        "GET", VARS_URL, headers={"user-agent": "mmtm-apk-tracker"}
+    )
+    raw = response.content
+    text = (
+        raw.decode("utf-16")
+        if raw.startswith((b"\xff\xfe", b"\xfe\xff"))
+        else raw.decode("utf-8")
+    )
+    match = re.search(r"mementomori_(\d+\.\d+\.\d+)\.apk", text)
+    if not match:
+        match = re.search(r"apkVersion\s*=\s*['\"](\d+\.\d+\.\d+)['\"]", text)
+    if not match:
+        raise RuntimeError("official vars.js did not contain an app version")
+    return match.group(1)
 
 
 @dataclass(frozen=True)
