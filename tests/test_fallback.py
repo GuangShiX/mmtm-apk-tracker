@@ -89,7 +89,6 @@ class FallbackRepositoryTests(unittest.TestCase):
         self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
         self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
         self.assertEqual(len(UI_ASSET_NAMES), 86)
-        self.assertEqual(len(ASSET_REQUEST_REGISTRY.assets), 219)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
         self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
 

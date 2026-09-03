@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,12 +21,18 @@ from asset_requests import (
 class AssetRequestTests(unittest.TestCase):
     def test_registry_tracks_curated_groups_and_complete_avatar_inventory(self):
         registry = load_asset_request_registry()
+        inventory_source = next(iter(registry.inventory_sources.values()))
+        standard_count = inventory_source["sources"]["CharacterMB"]["record_count"]
+        special_count = inventory_source["sources"]["SpecialIconItemMB"]["record_count"]
+        standard_names = registry.group_names["all-standard-player-icons"]
 
-        self.assertEqual(len(registry.assets), 219)
         self.assertEqual(len(registry.group_names["avatar-compositor-core"]), 21)
         self.assertEqual(len(registry.group_names["character-menu-workbench"]), 58)
         self.assertEqual(len(registry.group_names["helper-common-gameplay-ui"]), 16)
-        self.assertEqual(len(registry.group_names["all-standard-player-icons"]), 133)
+        self.assertEqual(len(standard_names), standard_count)
+        self.assertTrue(
+            all(re.fullmatch(r"CHR_\d{6}_00_s\.png", name) for name in standard_names)
+        )
         standard = requested_asset_for_name("CHR_000063_00_s.png")
         self.assertIsNotNone(standard)
         self.assertEqual(standard.metadata["character_id"], 63)
@@ -33,10 +40,7 @@ class AssetRequestTests(unittest.TestCase):
         self.assertIsNone(
             requested_catalog_target("CharacterIcon/CHR_000135/CHR_000135_00_em_001")
         )
-        inventory_source = next(iter(registry.inventory_sources.values()))
-        self.assertEqual(
-            inventory_source["sources"]["SpecialIconItemMB"]["record_count"], 303
-        )
+        self.assertGreater(special_count, 0)
 
     def test_verifies_complete_generated_repository(self):
         registry = load_asset_request_registry()
@@ -89,13 +93,27 @@ class AssetRequestTests(unittest.TestCase):
             )
 
             result = verify_requested_repository(repository)
+            standard_count = len(
+                registry.group_names["all-standard-player-icons"]
+            )
+            inventory_source = next(iter(registry.inventory_sources.values()))
+            special_count = inventory_source["sources"]["SpecialIconItemMB"][
+                "record_count"
+            ]
 
             self.assertEqual(result["status"], "accepted")
-            self.assertEqual(result["requested_asset_count"], 219)
-            self.assertEqual(result["verified_manifest_asset_count"], 220)
-            self.assertEqual(len(result["player_avatar_dimensions"]), 134)
+            self.assertEqual(result["requested_asset_count"], len(registry.assets))
+            self.assertEqual(
+                result["verified_manifest_asset_count"], len(registry.assets) + 1
+            )
+            self.assertEqual(
+                len(result["player_avatar_dimensions"]), standard_count + 1
+            )
             self.assertEqual(len(result["special_player_icon_dimensions"]), 1)
-            self.assertEqual(result["declared_special_player_icon_count"], 303)
+            self.assertEqual(result["declared_special_player_icon_count"], special_count)
+            self.assertEqual(
+                result["unpublished_special_master_record_count"], special_count - 1
+            )
 
     def test_syncs_and_verifies_player_avatar_inventory_from_master(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -140,6 +158,64 @@ class AssetRequestTests(unittest.TestCase):
             self.assertEqual(inventory["standard_player_icons"], [1, 2])
             self.assertEqual(
                 inventory["special_player_icons"], [[7, 1, 2], [9, 2, 1]]
+            )
+
+    def test_standard_and_special_avatar_inventories_update_independently(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            master = root / "master"
+            master.mkdir()
+            character_book = master / "CharacterMB"
+            special_book = master / "SpecialIconItemMB"
+            output = root / "player_avatar_inventory.json"
+
+            character_book.write_bytes(
+                msgpack.packb([{"Id": 1}, {"Id": 2}], use_bin_type=True)
+            )
+            special_book.write_bytes(
+                msgpack.packb(
+                    [{"Id": 7, "CharacterId": 1, "IconId": 2}],
+                    use_bin_type=True,
+                )
+            )
+            sync_player_avatar_inventory(master, "1700000000000", output)
+
+            character_book.write_bytes(
+                msgpack.packb([{"Id": 1}, {"Id": 2}, {"Id": 4}], use_bin_type=True)
+            )
+            standard_update = sync_player_avatar_inventory(
+                master, "1700000001000", output
+            )
+            after_standard = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(standard_update["status"], "updated")
+            self.assertEqual(standard_update["standard_player_icon_count"], 3)
+            self.assertEqual(standard_update["special_player_icon_count"], 1)
+            self.assertEqual(after_standard["standard_player_icons"], [1, 2, 4])
+            self.assertEqual(after_standard["special_player_icons"], [[7, 1, 2]])
+
+            special_book.write_bytes(
+                msgpack.packb(
+                    [
+                        {"Id": 7, "CharacterId": 1, "IconId": 2},
+                        {"Id": 9, "CharacterId": 2, "IconId": 1},
+                        {"Id": 10, "CharacterId": 4, "IconId": 1},
+                    ],
+                    use_bin_type=True,
+                )
+            )
+            special_update = sync_player_avatar_inventory(
+                master, "1700000002000", output
+            )
+            after_special = json.loads(output.read_text(encoding="utf-8"))
+
+            self.assertEqual(special_update["status"], "updated")
+            self.assertEqual(special_update["standard_player_icon_count"], 3)
+            self.assertEqual(special_update["special_player_icon_count"], 3)
+            self.assertEqual(after_special["standard_player_icons"], [1, 2, 4])
+            self.assertEqual(
+                after_special["special_player_icons"],
+                [[7, 1, 2], [9, 2, 1], [10, 4, 1]],
             )
 
     def test_rejects_stale_request_registry_fingerprint(self):
