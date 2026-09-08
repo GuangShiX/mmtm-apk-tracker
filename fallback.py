@@ -62,6 +62,10 @@ COMMON_GAMEPLAY_UI_ASSET_NAMES = set(
 UI_ASSET_NAMES = {
     asset.name for asset in ASSET_REQUEST_REGISTRY.assets if asset.category == "ui"
 }
+PACKAGE_UI_ASSET_NAMES = {
+    asset.name for asset in ASSET_REQUEST_REGISTRY.assets
+    if asset.category == "ui" and asset.delivery != "addressables"
+}
 UI_ASSET_NAMES_BY_CASE = {name.casefold(): name for name in UI_ASSET_NAMES}
 
 
@@ -355,7 +359,7 @@ def scan_package_critical_assets(
     assets = sorted(selected.values(), key=lambda item: (item.category, item.name))
     if not assets:
         raise RuntimeError("安装包中没有找到关键图标")
-    missing_ui = sorted(UI_ASSET_NAMES - {asset.name for asset in assets})
+    missing_ui = sorted(PACKAGE_UI_ASSET_NAMES - {asset.name for asset in assets})
     if require_ui and missing_ui:
         raise RuntimeError(f"安装包缺少公共 UI 图标: {', '.join(missing_ui)}")
     if len(assets) > MAX_ASSET_COUNT:
@@ -614,7 +618,7 @@ def _write_repository_metadata(
     if total_bytes > MAX_TOTAL_BYTES:
         raise RuntimeError(f"关键图标总体积异常: {total_bytes} > {MAX_TOTAL_BYTES}")
     missing_ui = sorted(
-        UI_ASSET_NAMES
+        (UI_ASSET_NAMES if require_requested_assets else PACKAGE_UI_ASSET_NAMES)
         - {entry["name"] for entry in entries if entry["category"] == "ui"}
     )
     if missing_ui:

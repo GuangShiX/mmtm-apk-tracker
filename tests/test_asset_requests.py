@@ -42,6 +42,20 @@ class AssetRequestTests(unittest.TestCase):
         )
         self.assertGreater(special_count, 0)
 
+    def test_exchange_shop_assets_have_exact_official_identities(self):
+        registry = load_asset_request_registry()
+        self.assertEqual(len(registry.group_names["helper-exchange-shop-tabs"]), 22)
+        for key, name in [
+            ("UI/Exchange/TabIcon/TabIcon_000001", "TabIcon_000001.png"),
+            ("UI/Exchange/TabIcon/TabIcon_000013", "TabIcon_000013.png"),
+            ("UI/Exchange/TabIcon/TabIcon_000060", "TabIcon_000060.png"),
+            ("UI/Exchange/TabDecoration/TabDecoration_05", "TabDecoration_05.png"),
+        ]:
+            self.assertEqual(requested_catalog_target(key), ("ui", name))
+        self.assertIsNone(requested_catalog_target("UI/Exchange/TabIcon/TabIcon_999999"))
+        self.assertEqual(requested_asset_for_name("button_l_01_orange.png").delivery, "package")
+        self.assertEqual(requested_asset_for_name("ItemIconCursor_cornerA.png").category, "ui")
+
     def test_verifies_complete_generated_repository(self):
         registry = load_asset_request_registry()
         with tempfile.TemporaryDirectory() as temp:

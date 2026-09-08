@@ -13,6 +13,8 @@ from fallback import (
     CORE_UI_ASSET_NAMES,
     GENERATED_MARKER,
     UI_ASSET_NAMES,
+    PACKAGE_UI_ASSET_NAMES,
+    _write_repository_metadata,
     _reuse_pixel_equivalent_repository_assets,
     _carry_forward_same_version_repository_assets,
     build_fallback_repository,
@@ -88,9 +90,21 @@ class FallbackRepositoryTests(unittest.TestCase):
         self.assertEqual(len(CORE_UI_ASSET_NAMES), 21)
         self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
         self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
-        self.assertEqual(len(UI_ASSET_NAMES), 86)
+        self.assertEqual(len(UI_ASSET_NAMES), 116)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
         self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
+
+    def test_base_package_defers_addressable_ui_until_hot_update(self):
+        self.assertIn("button_l_01_orange.png", PACKAGE_UI_ASSET_NAMES)
+        self.assertNotIn("TabIcon_000001.png", PACKAGE_UI_ASSET_NAMES)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            manifest = build_fallback_repository("1.2.3", root / "output", "owner/icons", create_version(root))
+            entries = [e for e in manifest["assets"] if not (e["category"] == "ui" and e["name"] not in PACKAGE_UI_ASSET_NAMES)]
+            partial = _write_repository_metadata("1.2.3", root / "output", "owner/icons", entries, datetime.now(timezone.utc), require_requested_assets=False)
+            self.assertEqual(partial["request_registry_status"], "incomplete")
+            with self.assertRaisesRegex(RuntimeError, "TabIcon_000001"):
+                _write_repository_metadata("1.2.3", root / "output", "owner/icons", entries, datetime.now(timezone.utc))
 
     def test_builds_small_canonical_repository_with_stable_urls(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -155,6 +155,128 @@
         "file": "player_avatar_inventory.json",
         "section": "standard_player_icons"
       }
+    },
+    {
+      "id": "helper-exchange-shop-chrome",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "package",
+      "consumers": [
+        "mementomori-helper-web:shop-card-master"
+      ],
+      "reason": "ExchangeMainViewController: common product panel, orange purchase button, tab background and selected cursor.",
+      "names": [
+        "base_l_01.png",
+        "tab_bg.png",
+        "button_l_01_orange.png",
+        "ItemIconCursor_cornerA.png",
+        "ItemIconCursor_cornerB.png",
+        "ItemIconCursor_lineA1.png",
+        "ItemIconCursor_lineA2.png",
+        "ItemIconCursor_lineB1.png",
+        "ItemIconCursor_lineB2.png",
+        "ItemIconCursor_point.png"
+      ]
+    },
+    {
+      "id": "helper-exchange-shop-tabs",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "addressables",
+      "consumers": [
+        "mementomori-helper-web:shop-category-navigation"
+      ],
+      "reason": "Exact UI/Exchange Sprite keys from official 4.21.0 catalog; storefronts, currencies, active event and watercolor decoration.",
+      "assets": [
+        {
+          "name": "TabDecoration_01.png",
+          "addressable_key": "UI/Exchange/TabDecoration/TabDecoration_01"
+        },
+        {
+          "name": "TabDecoration_02.png",
+          "addressable_key": "UI/Exchange/TabDecoration/TabDecoration_02"
+        },
+        {
+          "name": "TabDecoration_03.png",
+          "addressable_key": "UI/Exchange/TabDecoration/TabDecoration_03"
+        },
+        {
+          "name": "TabDecoration_04.png",
+          "addressable_key": "UI/Exchange/TabDecoration/TabDecoration_04"
+        },
+        {
+          "name": "TabDecoration_05.png",
+          "addressable_key": "UI/Exchange/TabDecoration/TabDecoration_05"
+        },
+        {
+          "name": "TabIcon_000001.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000001"
+        },
+        {
+          "name": "TabIcon_000002.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000002"
+        },
+        {
+          "name": "TabIcon_000003.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000003"
+        },
+        {
+          "name": "TabIcon_000004.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000004"
+        },
+        {
+          "name": "TabIcon_000005.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000005"
+        },
+        {
+          "name": "TabIcon_000006.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000006"
+        },
+        {
+          "name": "TabIcon_000007.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000007"
+        },
+        {
+          "name": "TabIcon_000008.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000008"
+        },
+        {
+          "name": "TabIcon_000009.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000009"
+        },
+        {
+          "name": "TabIcon_000010.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000010"
+        },
+        {
+          "name": "TabIcon_000011.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000011"
+        },
+        {
+          "name": "TabIcon_000012.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000012"
+        },
+        {
+          "name": "TabIcon_000013.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000013"
+        },
+        {
+          "name": "TabIcon_000016.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000016"
+        },
+        {
+          "name": "TabIcon_000043.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000043"
+        },
+        {
+          "name": "TabIcon_000060.png",
+          "addressable_key": "UI/Exchange/TabIcon/TabIcon_000060"
+        },
+        {
+          "name": "TabSpecial_01.png",
+          "addressable_key": "UI/Exchange/TabSpecial/TabSpecial_01"
+        }
+      ]
     }
   ]
 }
