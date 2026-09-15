@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "game": "MementoMori",
-  "master_version": "1788336786092",
-  "generated_at_utc": "2026-09-02T08:13:06.092000+00:00",
+  "master_version": "1789454960398",
+  "generated_at_utc": "2026-09-15T06:49:20.398000+00:00",
   "sources": {
     "CharacterMB": {
-      "sha256": "e83aaea6d3686b1804fe8a988c7c9438281c6ae168813c19ff0828bc5c981cc7",
+      "sha256": "3bd14bb417f2c8dd129e1ec4a9cfda29a3dc130c24bf821fc8988d03902d6066",
       "record_count": 134
     },
     "SpecialIconItemMB": {
