@@ -787,6 +787,45 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
                 )
 
         if not applied:
+            match = re.search(r"攻击目标增加为(\d+)名随机敌人", core)
+            if match:
+                value = match.group(1)
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: "随机对" in item and "名敌人" in item and "伤害" in item,
+                    r"随机对\d+名敌人",
+                    f"随机对{value}名敌人",
+                )
+
+        if not applied:
+            match = re.search(
+                r"「护盾」值提升为[^。]*?攻击力×([\d.]+)%", core
+            )
+            if match:
+                value = match.group(1)
+                target_specific = "附加目标" in core
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: (
+                        "「护盾」" in item
+                        and ("附加目标" in item) == target_specific
+                    ),
+                    r"(攻击力×)[\d.]+%",
+                    rf"\g<1>{value}%",
+                )
+
+        if not applied:
+            match = re.search(
+                r"^(?:发动攻击前，)?如果(.+?)，"
+                r"((?:造成的)?(?:物理|魔法)?伤害提升为攻击力×[\d.]+%)$",
+                core,
+            )
+            if match:
+                condition, effect = match.groups()
+                text = _append_sentence(text, f"若{condition}，{effect}")
+                applied = True
+
+        if not applied:
             match = re.search(
                 r"(?:造成的)?(?:物理|魔法)?伤害提升为攻击力×([\d.]+)%", core
             )
@@ -849,6 +888,8 @@ def _compact_skill_text(skill: dict[str, Any], language: str) -> str:
     descriptions = [
         description
         for level in levels
+        # LR exclusive upgrades are shown separately in the weapon section.
+        if level.get("equipment_rarity_flags") != 512
         if (description := _localized(level.get("descriptions"), language))
     ]
     if not descriptions:
@@ -985,6 +1026,41 @@ def _minify_compact_text(text: str) -> str:
         r"附带\1时受到攻击，阻绝\2%伤害",
         text,
     )
+    text = re.sub(
+        r"如果([^，。]+)在敌人发动攻击后仍然存活，([\d.]+)%概率解除"
+        r"附带弱化效果最多的友军身上的1种弱化效果",
+        r"敌人攻击后若\1存活，\2%概率解除弱化最多的友军1种弱化",
+        text,
+    )
+    text = re.sub(
+        r"在解除弱化效果发动判定前，如果身上附带弱化效果的友军人数为0，"
+        r"[^，。]+使攻击力最高的(\d+)名友军额外增加([\d.]+)%攻击力，"
+        r"效果持续(\d+)回合",
+        r"判定前若没有友军带弱化，使攻击力最高的\1名友军攻击力+\2%，持续\3回合",
+        text,
+    )
+    text = re.sub(
+        r"若([^，。]+)在战斗中因技能效果解除的弱化效果总数达(\d+)种以上，"
+        r"造成的(?:物理|魔法)?伤害提升为",
+        r"若\1通过技能累计解除弱化≥\2种，伤害提升至",
+        text,
+    )
+    text = re.sub(
+        r"第1回合开始时，[^，。]+使全体友军获得([^，。]+攻击力×[\d.]+%)的「护盾」",
+        r"第1回合开始，为全体友军附加\1的「护盾」",
+        text,
+    )
+    text = re.sub(
+        r"当「护盾」的附加目标为([^，。]+)时，「护盾」值提升为([^。]+)",
+        r"\1目标的「护盾」提升至\2",
+        text,
+    )
+    text = re.sub(
+        r"战斗开始时，[^，。]+额外减少([\d.]+)%自身承受伤害",
+        r"战斗开始时，自身承受伤害-\1%",
+        text,
+    )
+    text = re.sub(r"额外减少([\d.]+)%吸血", r"吸血-\1%", text)
     return text
 
 

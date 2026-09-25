@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from skill_card import (
     CardAssets,
@@ -19,12 +19,14 @@ from skill_card import (
     _font,
     _font_collection_index,
     _compact_skill_text,
+    _compact_body_layout,
     _compact_skill_records,
     _compact_identity_copy,
     _compact_weapon_effect_rows,
     _card_manifest_key,
     _level_label,
     _minify_compact_text,
+    _font_candidates,
     _resolve_character_jsons,
     _sha256,
     _update_card_manifest,
@@ -318,6 +320,102 @@ class SkillCardTests(unittest.TestCase):
             [skill["id"] for skill in skills],
             [151001, 151002, 151003, 151004],
         )
+
+    def test_compact_text_keeps_conditional_damage_and_final_shield_values(self):
+        conditional = _skill(97002, "active", "条件伤害")
+        conditional["levels"] = [
+            {"descriptions": {"zh-CN": "随机对2名敌人造成攻击力×280%的物理伤害。"}},
+            {"descriptions": {"zh-CN": "造成的物理伤害提升为攻击力×580%。"}},
+            {"descriptions": {"zh-CN": "攻击目标增加为3名随机敌人。"}},
+            {
+                "descriptions": {
+                    "zh-CN": "发动攻击前，如果库希与友军在战斗中因技能效果解除的弱化效果总数达5种以上，造成的物理伤害提升为攻击力×870%。"
+                }
+            },
+        ]
+        shield = _skill(97004, "passive", "护盾")
+        shield["levels"] = [
+            {
+                "descriptions": {
+                    "zh-CN": "第1回合开始时，库希使全体友军获得库希攻击力×40%的「护盾」，效果持续6回合（无法被解除）。"
+                }
+            },
+            {
+                "descriptions": {
+                    "zh-CN": "当「护盾」的附加目标为忧蓝属性时，「护盾」值提升为库希攻击力×200%。"
+                }
+            },
+            {
+                "descriptions": {
+                    "zh-CN": "战斗开始时，库希额外减少40%自身承受伤害（无法被解除）。"
+                }
+            },
+            {
+                "descriptions": {
+                    "zh-CN": "强化离巢的时刻，「护盾」值提升为库希攻击力×100%。当附加目标为忧蓝属性时，「护盾」值提升为库希攻击力×500%。"
+                }
+            },
+        ]
+
+        conditional_text = _compact_skill_text(conditional, "zh-CN")
+        shield_text = _compact_skill_text(shield, "zh-CN")
+
+        self.assertIn("随机对3名敌人造成攻击力×580%的物理伤害", conditional_text)
+        self.assertIn("若库希与友军通过技能累计解除弱化≥5种，伤害提升至攻击力×870%", conditional_text)
+        self.assertNotIn("随机对2名敌人", conditional_text)
+        self.assertIn("库希攻击力×100%的「护盾」", shield_text)
+        self.assertIn("忧蓝属性目标的「护盾」提升至库希攻击力×500%", shield_text)
+        self.assertNotIn("攻击力×40%", shield_text)
+        self.assertNotIn("攻击力×200%", shield_text)
+
+    def test_compact_text_excludes_lr_exclusive_upgrade(self):
+        skill = _skill(97001, "active", "雏鸟爪击")
+        skill["levels"] = [
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "库希随机对3名敌人造成攻击力×230%的物理伤害。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "造成的物理伤害提升为攻击力×380%。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 128,
+                "descriptions": {"zh-CN": "强化雏鸟爪击，攻击目标增加为5名随机敌人。"},
+            },
+            {
+                "equipment_rarity_flags": 512,
+                "descriptions": {
+                    "zh-CN": "强化雏鸟爪击，造成的物理伤害提升为攻击力×420%。"
+                },
+            },
+        ]
+
+        text = _compact_skill_text(skill, "zh-CN")
+
+        self.assertEqual(text, "库希随机对5名敌人造成攻击力×380%的物理伤害。")
+        self.assertNotIn("420%", text)
+
+    def test_latest_kushi_skill_copy_fits_compact_panels(self):
+        # Text measured from the latest official Master payload for character 97.
+        texts = (
+            "库希随机对5名敌人造成攻击力×380%的物理伤害。攻击结束后，使其他友军与5名随机敌人吸血-50%，效果持续4回合。",
+            "随机对3名敌人造成攻击力×580%的物理伤害。若库希与友军通过技能累计解除弱化≥5种，伤害提升至攻击力×870%。",
+            "敌人攻击后若库希存活，30%概率解除弱化最多的友军1种弱化。判定前若没有友军带弱化，使攻击力最高的2名友军攻击力+30%，持续1回合（无法解除）。",
+            "第1回合开始，为全体友军附加库希攻击力×100%的「护盾」，效果持续6回合（无法解除）。忧蓝属性目标的「护盾」提升至库希攻击力×500%。战斗开始时，自身承受伤害-40%（无法解除）。",
+        )
+        draw = ImageDraw.Draw(Image.new("RGB", (COMPACT_WIDTH, COMPACT_HEIGHT)))
+        fonts = _font_candidates()
+        panel_width = COMPACT_WIDTH - 2 * 60 - 160
+
+        for text in texts:
+            with self.subTest(text=text[:12]):
+                body, _, _, _ = _compact_body_layout(draw, text, fonts, panel_width, 326)
+                self.assertGreaterEqual(body.size, 44)
 
     def test_renderer_accepts_master_json_without_character_specific_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
