@@ -42,6 +42,25 @@ class AssetRequestTests(unittest.TestCase):
         )
         self.assertGreater(special_count, 0)
 
+    def test_profession_icons_are_exact_package_sprites_with_a_team_builder_consumer(self):
+        registry = load_asset_request_registry()
+        names = {
+            "icon_job_warrior.png",
+            "icon_job_sniper.png",
+            "icon_job_sorcerer.png",
+        }
+        self.assertEqual(registry.group_names["team-builder-profession-icons"], names)
+        for name in names:
+            request = requested_asset_for_name(name)
+            self.assertEqual(request.category, "ui")
+            self.assertEqual(request.kind, "official-ui-sprite")
+            self.assertEqual(request.delivery, "package")
+            self.assertIn("mementomori-team-builder:character-profession", request.consumers)
+        warrior = requested_asset_for_name("icon_job_warrior.png")
+        self.assertIn("character-menu-workbench", warrior.groups)
+        self.assertEqual(sum(request.name == warrior.name for request in registry.assets), 1)
+        self.assertIsNone(requested_asset_for_name("icon_job_unknown.png"))
+
     def test_exchange_shop_assets_have_exact_official_identities(self):
         registry = load_asset_request_registry()
         self.assertEqual(len(registry.group_names["helper-exchange-shop-tabs"]), 22)

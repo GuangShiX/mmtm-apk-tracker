@@ -114,6 +114,25 @@
       ]
     },
     {
+      "id": "team-builder-profession-icons",
+      "category": "ui",
+      "kind": "official-ui-sprite",
+      "delivery": "package",
+      "consumers": [
+        "mementomori-team-builder:character-profession"
+      ],
+      "reason": "The team builder shows the official warrior, sniper and sorcerer profession badges next to character portraits.",
+      "evidence": {
+        "bundle": "d8e6c8c3a22da3265163f34736d7d400",
+        "source": "Official APK AtlasCommonIcon Sprite objects"
+      },
+      "names": [
+        "icon_job_warrior.png",
+        "icon_job_sniper.png",
+        "icon_job_sorcerer.png"
+      ]
+    },
+    {
       "id": "helper-common-gameplay-ui",
       "category": "ui",
       "kind": "official-ui-sprite",

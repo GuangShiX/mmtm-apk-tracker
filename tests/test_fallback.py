@@ -90,9 +90,13 @@ class FallbackRepositoryTests(unittest.TestCase):
         self.assertEqual(len(CORE_UI_ASSET_NAMES), 21)
         self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
         self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
-        self.assertEqual(len(UI_ASSET_NAMES), 116)
+        self.assertEqual(len(UI_ASSET_NAMES), 118)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
         self.assertLessEqual(CHARACTER_MENU_UI_ASSET_NAMES, UI_ASSET_NAMES)
+        self.assertLessEqual(
+            {"icon_job_warrior.png", "icon_job_sniper.png", "icon_job_sorcerer.png"},
+            PACKAGE_UI_ASSET_NAMES,
+        )
 
     def test_base_package_defers_addressable_ui_until_hot_update(self):
         self.assertIn("button_l_01_orange.png", PACKAGE_UI_ASSET_NAMES)
