@@ -27,7 +27,11 @@ class AssetRequestTests(unittest.TestCase):
         standard_names = registry.group_names["all-standard-player-icons"]
 
         self.assertEqual(len(registry.group_names["avatar-compositor-core"]), 21)
-        self.assertEqual(len(registry.group_names["character-menu-workbench"]), 58)
+        self.assertEqual(len(registry.group_names["character-menu-workbench"]), 60)
+        self.assertTrue(
+            {"icon_job_warrior.png", "icon_job_sniper.png", "icon_job_sorcerer.png"}
+            <= registry.group_names["character-menu-workbench"]
+        )
         self.assertEqual(len(registry.group_names["helper-common-gameplay-ui"]), 16)
         self.assertEqual(len(standard_names), standard_count)
         self.assertTrue(

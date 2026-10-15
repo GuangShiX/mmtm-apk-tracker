@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from fallback import (
     ASSET_REQUEST_REGISTRY,
@@ -88,7 +90,7 @@ def create_version(root: Path, version="1.2.3") -> Path:
 class FallbackRepositoryTests(unittest.TestCase):
     def test_ui_allowlist_preserves_character_menu_dependencies(self):
         self.assertEqual(len(CORE_UI_ASSET_NAMES), 21)
-        self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 58)
+        self.assertEqual(len(CHARACTER_MENU_UI_ASSET_NAMES), 60)
         self.assertEqual(len(COMMON_GAMEPLAY_UI_ASSET_NAMES), 16)
         self.assertEqual(len(UI_ASSET_NAMES), 118)
         self.assertIn("image_levellink.png", CHARACTER_MENU_UI_ASSET_NAMES)
@@ -249,6 +251,105 @@ class FallbackRepositoryTests(unittest.TestCase):
             self.assertEqual(carried, 1)
             self.assertEqual(entries, [entry])
             self.assertEqual((staging / relative).read_bytes(), b"catalog-only")
+
+
+    def _legacy_repository(self, root, names):
+        output, staging = root / "output", root / "staging"
+        staging.mkdir()
+        entries = []
+        for category, name in names:
+            relative = Path("assets") / category / name
+            source = output / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            content = ("original:" + name).encode()
+            source.write_bytes(content)
+            entries.append({
+                "category": category,
+                "name": name,
+                "path": relative.as_posix(),
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "source_catalog_keys": ["official/" + name],
+            })
+        (output / "manifest.json").write_text(
+            json.dumps({"version": "4.23.0", "assets": entries}), encoding="utf-8"
+        )
+        return output, staging, entries
+
+    def test_cross_version_preserves_only_still_requested_downloadable_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output, staging, old_entries = self._legacy_repository(Path(temp), [
+                ("ui", "TabIcon_000060.png"),
+                ("ui", "icon_job_sniper.png"),
+                ("ui", "icon_job_warrior.png"),
+                ("ui", "TabIcon_000013.png"),
+                ("equipment", "EQP_999999.png"),
+            ])
+            requests = {
+                name: SimpleNamespace(key=("ui", name), category="ui", delivery=delivery)
+                for name, delivery in (
+                    ("TabIcon_000060.png", "addressables"),
+                    ("icon_job_sniper.png", "package-or-addressables"),
+                    ("icon_job_warrior.png", "package"),
+                )
+            }
+            entries = []
+            with patch("fallback.requested_asset_for_name", side_effect=requests.get):
+                carried = _carry_forward_same_version_repository_assets(
+                    "5.0.0", output, staging, entries
+                )
+            self.assertEqual(carried, 2)
+            self.assertEqual([entry["name"] for entry in entries],
+                             ["TabIcon_000060.png", "icon_job_sniper.png"])
+            for entry, old_entry in zip(entries, old_entries):
+                self.assertEqual(entry, {**old_entry, "preserved_from_version": "4.23.0"})
+                self.assertEqual((staging / entry["path"]).read_bytes(),
+                                 (output / entry["path"]).read_bytes())
+            for old_entry in old_entries[2:]:
+                self.assertFalse((staging / old_entry["path"]).exists())
+            self.assertNotIn("preserved_from_version", old_entries[0])
+
+    def test_cross_version_keeps_newly_exported_asset_instead_of_old_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output, staging, old_entries = self._legacy_repository(
+                Path(temp), [("ui", "TabIcon_000060.png")]
+            )
+            target = staging / old_entries[0]["path"]
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"new official bytes")
+            entries = [{**old_entries[0], "sha256": "fresh-export"}]
+            carried = _carry_forward_same_version_repository_assets(
+                "5.0.0", output, staging, entries
+            )
+            self.assertEqual(carried, 0)
+            self.assertEqual(target.read_bytes(), b"new official bytes")
+            self.assertEqual(entries[0]["sha256"], "fresh-export")
+            self.assertNotIn("preserved_from_version", entries[0])
+
+    def test_cross_version_rejects_corrupt_or_noncanonical_preserved_asset(self):
+        for problem in ("hash", "size", "escape", "misplaced"):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temp:
+                output, staging, old_entries = self._legacy_repository(
+                    Path(temp), [("ui", "TabIcon_000060.png")]
+                )
+                if problem == "hash":
+                    old_entries[0]["sha256"] = "0" * 64
+                elif problem == "size":
+                    old_entries[0]["size"] += 1
+                elif problem == "escape":
+                    old_entries[0]["path"] = "../outside.png"
+                else:
+                    old_entries[0]["path"] = "assets/ui/different.png"
+                (output / "manifest.json").write_text(
+                    json.dumps({"version": "4.23.0", "assets": old_entries}),
+                    encoding="utf-8",
+                )
+                entries = []
+                with self.assertRaisesRegex(RuntimeError, "校验失败|路径"):
+                    _carry_forward_same_version_repository_assets(
+                        "5.0.0", output, staging, entries
+                    )
+                self.assertEqual(entries, [])
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ class OfficialAssetInfo:
     master_version: str
     asset_uri_format: str
     master_uri_format: str = ""
+    raw_data_uri_format: str = ""
 
     def asset_url(self, relative_path: str) -> str:
         if "{0}" not in self.asset_uri_format:
@@ -54,6 +55,11 @@ class OfficialAssetInfo:
         return self.master_uri_format.replace(
             "{0}", self.master_version
         ).replace("{1}", master_book_name)
+
+    def raw_data_url(self, relative_path: str) -> str:
+        if "{0}" not in self.raw_data_uri_format:
+            raise RuntimeError("官方 RawData URL 格式缺少 {0} 占位符")
+        return self.raw_data_uri_format.replace("{0}", relative_path)
 
     @property
     def catalog_url(self) -> str:
@@ -139,6 +145,7 @@ def get_official_asset_info(app_version: str | None = None) -> OfficialAssetInfo
     master_version = response.headers.get("ortegamasterversion", "")
     asset_uri_format = data.get("AssetCatalogFixedUriFormat", "")
     master_uri_format = data.get("MasterUriFormat", "")
+    raw_data_uri_format = data.get("RawDataUriFormat", "")
     reported_version = data.get("AppAssetVersionInfo", {}).get("Version", "")
     if reported_version and reported_version != app_version:
         raise RuntimeError(
@@ -152,6 +159,7 @@ def get_official_asset_info(app_version: str | None = None) -> OfficialAssetInfo
         master_version=master_version,
         asset_uri_format=asset_uri_format,
         master_uri_format=master_uri_format,
+        raw_data_uri_format=raw_data_uri_format,
     )
 
 

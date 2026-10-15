@@ -118,38 +118,41 @@ python master.py \
 
 ### 通用技能介绍图
 
-`skill_card.py` 使用 `skills/characters/*.json`、官方角色小头像、专武图标及技能图标生成统一介绍图。`full` 为 3840×2160 横版并保留官方各等级全文；`compact` 为 2160×3840 文字优先竖屏一图流：顶部使用无遮挡的大一级角色头像并在右上角显示 `Made By 光时` 作者水印，主体依次展示四个技能，底部再展示专武、LR 专效果、秘仪 LR 效果与解锁角色头像。技能与专武图标使用同一尺寸，省流文本会去掉台词、合并等级/专武强化、压缩常见冗长句式，只留下最终效果。背景、中文排版、分句换行和字号适配均由代码确定，不依赖生成式图片模型，也不包含角色专用硬编码文案：
+推荐从统一的[角色发布流程](docs/character-release-workflow.md)开始：
 
+```bash
+# 固定一次官方版本发现，复用已校验主表与美术缓存；可重复执行恢复
+python character_release.py --output fallback_dist --character-id 155 --preview-id 157
+```
+
+正式数据与未实装预览分别校验；海报专武栏右上方显示官方角色的初始速度。制作海报可独立于完整 APK 提取进行。已有固定快照时，可指定 `--source-context`，并用 `--offline` 完全离线恢复；数据、模板、字体和素材校验值均未变化时跳过重绘。
+
+`skill_card.py` 统一使用 `split` 横屏模板（3840×2500）：左侧为官方完整横幅、角色身份与立绘，右侧为四个技能，底部为专武与秘仪。默认生成与默认校验使用同一模板；`compact` 竖版及 `both` 模式已停用。技能文本保留最终强化效果，自动分句换行并适配字号。
 ```bash
 # 生成当前最新实装角色；同一时刻有多个角色时全部生成
 python skill_card.py \
   --latest \
   --skills-dir fallback_dist/skills \
   --output-dir fallback_dist/cards/characters \
-  --mode compact
+  --mode split
 
 # 不访问官方接口，校验最新角色卡是否匹配技能 JSON、模板版本、尺寸与哈希
 python skill_card.py \
   --verify-latest \
   --skills-dir fallback_dist/skills \
   --output-dir fallback_dist/cards/characters \
-  --mode compact
+  --mode split
 
 # 指定角色和输出文件
 python skill_card.py \
   --character-id 150 \
   --skills-dir fallback_dist/skills \
-  --output output/florence-150-compact.png \
-  --mode compact
+  --output output/florence-150-split.png \
+  --mode split
 
-# 批量重建角色库中的全部技能图
-python skill_card.py \
-  --all \
-  --skills-dir fallback_dist/skills \
-  --output-dir fallback_dist/cards/characters
 ```
 
-生成器会从官方 Addressables catalog 精确解析 `CharacterIcon/CHR_<ID>`、`Icon/Equipment/EQP_<图标ID>` 和 `Icon/Skill/CSK_<技能ID>` 的 Bundle，并缓存已校验下载。全文版文件名为 `character-<ID>-zh-CN.png`，省流版为 `character-<ID>-compact-zh-CN.png`。批量生成会同步维护 `cards/manifest.json`，记录角色技能 JSON 哈希、模板版本、素材版本、图片哈希和尺寸；CI 先验证现有 Master 导出，官方 `masterVersion` 未变化且没有已到期的未来角色时不重复下载 MasterBook，再离线检查卡片，只在最新角色缺图或数据/模板变化时获取官方美术素材并重绘。每个技能面板会选择能够完整容纳正文的最大可读字号；若四技能无法在单图中清晰排入，生成会明确失败，不会缩成小字或裁掉内容。
+生成器会从官方 Addressables catalog 精确解析 `CharacterIcon/CHR_<ID>`、`Icon/Equipment/EQP_<图标ID>` 和 `Icon/Skill/CSK_<技能ID>` 的 Bundle，并缓存已校验下载。统一文件名为 `character-<ID>-split-zh-CN.png`，清单键为 `<ID>:zh-CN:split`。旧竖版卡片不能通过横版校验，也不会被新流程覆盖或发布。批量生成会同步维护 `cards/manifest.json`，记录角色技能 JSON 哈希、模板版本、素材版本、图片哈希和尺寸；CI 先验证现有 Master 导出，官方 `masterVersion` 未变化且没有已到期的未来角色时不重复下载 MasterBook，再离线检查卡片，只在最新角色缺图或数据/模板变化时获取官方美术素材并重绘。每个技能面板会选择能够完整容纳正文的最大可读字号；若四技能无法在单图中清晰排入，生成会明确失败，不会缩成小字或裁掉内容。
 
 helper 侧的实现边界和新 session 提示词见 [docs/helper-image-cache-handoff.md](docs/helper-image-cache-handoff.md)。
 

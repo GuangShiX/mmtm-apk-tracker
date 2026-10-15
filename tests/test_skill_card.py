@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -9,10 +10,10 @@ from PIL import Image, ImageDraw
 from skill_card import (
     CardAssets,
     COMPACT_AVATAR_SIZE,
-    COMPACT_HEIGHT,
+    SPLIT_HEIGHT,
     COMPACT_ICON_SIZE,
-    COMPACT_TEMPLATE_VERSION,
-    COMPACT_WIDTH,
+    SPLIT_TEMPLATE_VERSION,
+    SPLIT_WIDTH,
     FontSet,
     COMPACT_WATERMARK,
     _draw_compact_watermark,
@@ -209,6 +210,64 @@ class SkillCardTests(unittest.TestCase):
             "第7回合起，发动此技能不会恢复生命值，造成的物理伤害提升为攻击力×1960%。",
         )
 
+    def test_compact_text_uses_final_speed_upgrade(self):
+        skill = {
+            "levels": [
+                {
+                    "equipment_rarity_flags": 0,
+                    "descriptions": {
+                        "zh-CN": "战斗开始时，亚历珊卓额外增加15%速度（无法被解除）。"
+                    },
+                },
+                {
+                    "equipment_rarity_flags": 0,
+                    "descriptions": {"zh-CN": "速度增幅提升为30%。"},
+                },
+            ]
+        }
+
+        self.assertEqual(
+            _compact_skill_text(skill, "zh-CN"),
+            "战斗开始时，亚历珊卓额外增加30%速度（无法解除）。",
+        )
+
+    def test_compact_text_preserves_cast_count_damage_thresholds(self):
+        skill = {"levels": [
+            {"descriptions": {"zh-CN": "对魔法防御力最低的敌人进行5次攻击，每次造成攻击力×320%的魔法伤害。"}},
+            {"descriptions": {"zh-CN": "战斗中自第3次发动此技能起，造成的魔法伤害提升为攻击力×960%。"}},
+            {"descriptions": {"zh-CN": "战斗中自第4次发动此技能起，造成的魔法伤害提升为攻击力×1280%。"}},
+        ]}
+        text = _compact_skill_text(skill, "zh-CN")
+        self.assertIn("每次造成攻击力×320%", text)
+        self.assertIn("自第3次发动此技能起，造成的魔法伤害提升为攻击力×960%", text)
+        self.assertIn("自第4次发动此技能起，造成的魔法伤害提升为攻击力×1280%", text)
+
+    def test_compact_text_preserves_shield_trigger_limits(self):
+        skill = {"levels": [
+            {"descriptions": {"zh-CN": "回合开始时，拉米斯使自己与攻击力最高的其他友军获得拉米斯攻击力×100%的「护盾」，效果持续3回合。此技能须在结束3次行动后才可再次触发。自第13回合起无法触发此技能。"}},
+            {"descriptions": {"zh-CN": "当「护盾」的附加目标为流金属性时，「护盾」值提升为拉米斯攻击力×200%。"}},
+            {"descriptions": {"zh-CN": "战斗中自第2次触发此技能起，流金属性目标的「护盾」值提升为拉米斯攻击力×600%。"}},
+        ]}
+        text = _compact_skill_text(skill, "zh-CN")
+        for required in ("结束3次行动后才可再次触发", "第13回合起无法触发", "×100%", "×200%", "自第2次触发此技能起", "×600%"):
+            self.assertIn(required, text)
+
+    def test_compact_text_merges_skill_target_and_named_buff_upgrades(self):
+        attack = {"levels": [
+            {"descriptions": {"zh-CN": "随机对3名敌人造成攻击力×590%的魔法伤害。"}},
+            {"descriptions": {"zh-CN": "技能目标增加为5名随机敌人。"}},
+        ]}
+        self.assertEqual(_compact_skill_text(attack, "zh-CN"), "随机对5名敌人造成攻击力×590%的魔法伤害。")
+        buff = {"levels": [
+            {"descriptions": {"zh-CN": "战斗开始时，亚历珊卓使自己与攻击力最高的其他友军获得「结界」，效果持续1回合（无法被解除）。"}},
+            {"descriptions": {"zh-CN": "「结界」效果增加为3回合。"}},
+            {"equipment_rarity_flags": 256, "descriptions": {"zh-CN": "强化一同活下去，「结界」的附加目标增加为亚历珊卓与攻击力最高的2名其他友军。"}},
+        ]}
+        text = _compact_skill_text(buff, "zh-CN")
+        self.assertIn("使自己与攻击力最高的2名其他友军获得「结界」，效果持续3回合", text)
+        self.assertNotIn("效果持续1回合", text)
+        self.assertNotIn("附加目标增加为", text)
+
     def test_compact_text_minifies_common_master_phrases(self):
         source = (
             "战斗开始时，佛罗伦斯强化自己的普通攻击，并额外减少40%自身承受伤害，"
@@ -222,6 +281,140 @@ class SkillCardTests(unittest.TestCase):
             "战斗开始时，强化普通攻击，承受伤害-40%、最大生命值+100%（无法解除），持续10回合。"
             "若恢复前目标生命值≥50%且附带控制效果，解除其所有控制效果。",
         )
+
+    def test_compact_text_keeps_final_target_upgrade_only(self):
+        skill = _skill(154003, "passive", "黄金圣剑士")
+        skill["levels"] = [
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "阿尔托莉亚使自己与攻击力最高的其他友军获得3层「圣剑光辉」。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "「圣剑光辉」的附加目标增加为阿尔托莉亚与攻击力最高的2名其他友军。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 256,
+                "descriptions": {
+                    "zh-CN": "强化黄金圣剑士，「圣剑光辉」的附加目标增加为全体友军。"
+                },
+            },
+        ]
+
+        text = _compact_skill_text(skill, "zh-CN")
+
+        self.assertIn("使全体友军获得3层「圣剑光辉」", text)
+        self.assertNotIn("附加目标增加为阿尔托莉亚与攻击力最高的2名其他友军", text)
+
+    def test_compact_text_keeps_self_hp_upgrade_separate_from_team_bonus(self):
+        skill = _skill(154004, "passive", "同伴情谊")
+        skill["levels"] = [
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "技能触发时，再使自己与攻击力最高的其他友军增加30%最大生命值（无法被解除）。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "战斗开始时，阿尔托莉亚使自己额外增加20%最大生命值，减少10%自身承受伤害（无法被解除）。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "战斗开始时的最大生命值增幅提升为100%，承受伤害降幅提升为60%。"
+                },
+            },
+        ]
+
+        text = _compact_skill_text(skill, "zh-CN")
+
+        self.assertIn("自己与攻击力最高的其他友军增加30%最大生命值", text)
+        self.assertIn("自己额外增加100%最大生命值", text)
+        self.assertNotIn("自己与攻击力最高的其他友军增加100%最大生命值", text)
+
+    def test_compact_text_merges_holy_sword_entries_and_final_values(self):
+        skill = _skill(154003, "passive", "黄金圣剑士")
+        skill["levels"] = [
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": (
+                        "阿尔托莉亚使自己与攻击力最高的其他友军获得3层「圣剑光辉」。"
+                        "如果「圣剑光辉」的附带者在受到魔法攻击后仍然存活，"
+                        "阿尔托莉亚消耗1层附带者身上的「圣剑光辉」，"
+                        "使附带者恢复承受伤害×20%的生命值（最多10%最大生命值）。"
+                        "当阿尔托莉亚失去战斗能力时，无法触发此技能的生命值恢复效果。"
+                    )
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "生命值恢复量提升为承受伤害×80%（最多20%最大生命值）。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 256,
+                "descriptions": {
+                    "zh-CN": "强化黄金圣剑士，「圣剑光辉」的附加目标增加为全体友军。"
+                },
+            },
+        ]
+
+        text = _compact_skill_text(skill, "zh-CN")
+
+        self.assertIn("使全体友军获得3层「圣剑光辉」", text)
+        self.assertIn("恢复承受伤害×80%的生命值（最多20%最大生命值）", text)
+        self.assertIn("；当阿尔托莉亚失去战斗能力时", text)
+        self.assertEqual(text.count("。"), 2)
+
+    def test_compact_text_keeps_healing_count_condition_for_damage_upgrade(self):
+        skill = _skill(154002, "active", "审判圣剑")
+        skill["levels"] = [
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "再随机对敌人进行2次攻击，每次造成攻击力×280%的物理伤害。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": "当阿尔托莉亚或友军在战斗中发动主动技能触发恢复生命值的效果达15次以上时，造成的物理伤害提升为攻击力×1120%。"
+                },
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {"zh-CN": "攻击次数增加为4次。"},
+            },
+            {
+                "equipment_rarity_flags": 0,
+                "descriptions": {
+                    "zh-CN": (
+                        "造成的物理伤害提升为攻击力×540%。"
+                        "当阿尔托莉亚或友军在战斗中发动主动技能触发恢复生命值的效果达15次以上时，"
+                        "造成的物理伤害提升为攻击力×2160%。"
+                    )
+                },
+            },
+        ]
+
+        text = _compact_skill_text(skill, "zh-CN")
+
+        self.assertIn("进行4次攻击，每次造成攻击力×540%的物理伤害", text)
+        self.assertIn(
+            "若阿尔托莉亚或友军在战斗中发动主动技能触发恢复生命值的效果达15次以上，"
+            "造成的物理伤害提升为攻击力×2160%",
+            text,
+        )
+        self.assertNotIn("攻击力×1120%", text)
 
     def test_compact_text_combines_matching_defense_buffs(self):
         source = (
@@ -291,7 +484,7 @@ class SkillCardTests(unittest.TestCase):
                 payload,
                 assets,
                 Path("unused.png"),
-                mode="compact",
+                mode="split",
             )
 
     def test_compact_skills_exclude_unnamed_exclusive_effect_row(self):
@@ -400,23 +593,6 @@ class SkillCardTests(unittest.TestCase):
         self.assertEqual(text, "库希随机对5名敌人造成攻击力×380%的物理伤害。")
         self.assertNotIn("420%", text)
 
-    def test_latest_kushi_skill_copy_fits_compact_panels(self):
-        # Text measured from the latest official Master payload for character 97.
-        texts = (
-            "库希随机对5名敌人造成攻击力×380%的物理伤害。攻击结束后，使其他友军与5名随机敌人吸血-50%，效果持续4回合。",
-            "随机对3名敌人造成攻击力×580%的物理伤害。若库希与友军通过技能累计解除弱化≥5种，伤害提升至攻击力×870%。",
-            "敌人攻击后若库希存活，30%概率解除弱化最多的友军1种弱化。判定前若没有友军带弱化，使攻击力最高的2名友军攻击力+30%，持续1回合（无法解除）。",
-            "第1回合开始，为全体友军附加库希攻击力×100%的「护盾」，效果持续6回合（无法解除）。忧蓝属性目标的「护盾」提升至库希攻击力×500%。战斗开始时，自身承受伤害-40%（无法解除）。",
-        )
-        draw = ImageDraw.Draw(Image.new("RGB", (COMPACT_WIDTH, COMPACT_HEIGHT)))
-        fonts = _font_candidates()
-        panel_width = COMPACT_WIDTH - 2 * 60 - 160
-
-        for text in texts:
-            with self.subTest(text=text[:12]):
-                body, _, _, _ = _compact_body_layout(draw, text, fonts, panel_width, 326)
-                self.assertGreaterEqual(body.size, 44)
-
     def test_renderer_accepts_master_json_without_character_specific_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -446,12 +622,12 @@ class SkillCardTests(unittest.TestCase):
                 asset_version="asset",
             )
             output = root / "card.png"
-            render_skill_card(payload, assets, output)
+            render_skill_card(payload, assets, output, mode="full")
 
             with Image.open(output) as rendered:
                 self.assertEqual(rendered.size, (3840, 2160))
 
-    def test_compact_renderer_uses_portrait_canvas_and_larger_avatar_tier(self):
+    def test_default_renderer_uses_landscape_canvas_and_larger_avatar_tier(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             art = root / "art.png"
@@ -534,26 +710,36 @@ class SkillCardTests(unittest.TestCase):
                 encoding="utf-8",
             )
             output_dir = root / "cards" / "characters"
-            output = output_dir / "character-000042-compact-zh-CN.png"
-            render_skill_card(payload, assets, output, mode="compact")
+            output = output_dir / "character-000042-split-zh-CN.png"
+            render_skill_card(payload, assets, output)
 
             with Image.open(output) as rendered:
-                self.assertEqual(rendered.size, (COMPACT_WIDTH, COMPACT_HEIGHT))
+                self.assertEqual(rendered.size, (SPLIT_WIDTH, SPLIT_HEIGHT))
             self.assertGreater(COMPACT_AVATAR_SIZE, COMPACT_ICON_SIZE)
+
+            output_without_element = root / "card-without-element.png"
+            render_skill_card(
+                payload,
+                replace(assets, element=None),
+                output_without_element,
+                mode="split",
+            )
+            with Image.open(output_without_element) as rendered:
+                self.assertEqual(rendered.size, (SPLIT_WIDTH, SPLIT_HEIGHT))
             _update_card_manifest(
                 root / "cards" / "manifest.json",
                 [
                     {
-                        "key": _card_manifest_key(42, "zh-CN", "compact"),
+                        "key": _card_manifest_key(42, "zh-CN", "split"),
                         "character_id": 42,
                         "language": "zh-CN",
-                        "mode": "compact",
-                        "path": "characters/character-000042-compact-zh-CN.png",
+                        "mode": "split",
+                        "path": "characters/character-000042-split-zh-CN.png",
                         "source_sha256": _sha256(source),
-                        "template_version": COMPACT_TEMPLATE_VERSION,
+                        "template_version": SPLIT_TEMPLATE_VERSION,
                         "asset_version": "asset",
-                        "width": COMPACT_WIDTH,
-                        "height": COMPACT_HEIGHT,
+                        "width": SPLIT_WIDTH,
+                        "height": SPLIT_HEIGHT,
                         "sha256": _sha256(output),
                     }
                 ],

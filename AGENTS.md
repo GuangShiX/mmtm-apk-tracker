@@ -43,6 +43,20 @@ python fallback.py --auto-update --output fallback_dist
 python -m unittest discover -s tests -v
 ```
 
+## Skill Cards
+
+All future skill cards use the `split` landscape template (3840×2500).
+Generation, offline verification, documentation, and the asset repository's
+GitHub Actions workflow must use this same mode. Do not generate or publish
+the retired `compact` portrait template or `both` mode.
+
+Show official initial speed (`character.speed`, from
+`CharacterMB.InitialBattleParameter.Speed`) at the right of the exclusive-weapon
+panel header. Do not include equipment, growth, or skill bonuses in that value.
+Use `character_release.py` for resumable snapshot-based poster runs. Explicit
+unreleased/2100 placeholder previews belong under `preview/`; never change the
+formal export date or put those records in the released latest/index files.
+
 ## Generated Data
 
 Do not commit `apks/`, `extracted/`, `reports/`, or Python caches. Do not reintroduce AssetStudio, AssetRipper, Unity Editor rebuild tools, or Il2CppDumper unless explicitly requested.

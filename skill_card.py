@@ -16,7 +16,9 @@ import UnityPy
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from asset_cdn import (
+    OfficialAssetInfo,
     download_catalog,
+    download_file,
     download_target_bundles,
     get_official_asset_info,
     load_catalog,
@@ -32,11 +34,14 @@ WIDTH = 3840
 HEIGHT = 2160
 COMPACT_WIDTH = 2160
 COMPACT_HEIGHT = 3840
+SPLIT_WIDTH = WIDTH
+SPLIT_HEIGHT = 2500
 COMPACT_ICON_SIZE = 160
 COMPACT_AVATAR_SIZE = 270
 CARD_MANIFEST_SCHEMA_VERSION = 1
 FULL_TEMPLATE_VERSION = "landscape-full-v1"
 COMPACT_TEMPLATE_VERSION = "portrait-compact-v8"
+SPLIT_TEMPLATE_VERSION = "landscape-split-v8.2"
 COMPACT_WATERMARK = "Made By 光时"
 MARGIN = 48
 GAP = 30
@@ -90,6 +95,8 @@ class CardAssets:
     avatar: Path | None = None
     element: Path | None = None
     arcana_characters: dict[int, Path] = field(default_factory=dict)
+    job_icon: Path | None = None
+    banner: Path | None = None
 
 
 def _font_candidates() -> FontSet:
@@ -259,7 +266,9 @@ def _expected_card_size(mode: str) -> tuple[int, int]:
         return WIDTH, HEIGHT
     if mode == "compact":
         return COMPACT_WIDTH, COMPACT_HEIGHT
-    raise ValueError("mode 必须是 full 或 compact")
+    if mode == "split":
+        return SPLIT_WIDTH, SPLIT_HEIGHT
+    raise ValueError("mode 必须是 full、compact 或 split")
 
 
 def _template_version(mode: str) -> str:
@@ -267,7 +276,9 @@ def _template_version(mode: str) -> str:
         return FULL_TEMPLATE_VERSION
     if mode == "compact":
         return COMPACT_TEMPLATE_VERSION
-    raise ValueError("mode 必须是 full 或 compact")
+    if mode == "split":
+        return SPLIT_TEMPLATE_VERSION
+    raise ValueError("mode 必须是 full、compact 或 split")
 
 
 def _save_card(image: Image.Image, output: Path, mode: str) -> Path:
@@ -336,8 +347,10 @@ def verify_latest_skill_cards(
     output_dir: Path,
     *,
     language: str = "zh-CN",
-    mode: str = "compact",
+    mode: str = "split",
 ) -> list[Path]:
+    if mode not in ("split", "full"):
+        raise ValueError("竖版模板已停用，请使用 split 横版模板")
     modes = ("full", "compact") if mode == "both" else (mode,)
     sources = _resolve_character_jsons(skills_dir, None, True, False)
     manifest_path = output_dir.parent / "manifest.json"
@@ -357,7 +370,7 @@ def verify_latest_skill_cards(
         character_id = payload["character"]["id"]
         source_sha256 = _sha256(source)
         for card_mode in modes:
-            suffix = "" if card_mode == "full" else "-compact"
+            suffix = "" if card_mode == "full" else f"-{card_mode}"
             target = output_dir / f"character-{character_id:06d}{suffix}-{language}.png"
             key = _card_manifest_key(character_id, language, card_mode)
             entry = cards.get(key)
@@ -452,6 +465,43 @@ def _export_key_image(bundle_paths: list[Path], expected_name: str, output: Path
     return output
 
 
+def _fetch_official_character_banner(
+    info: Any,
+    cache_dir: Path,
+    character_id: int,
+    *,
+    language: str = "CN",
+    allow_missing: bool = False,
+) -> Path | None:
+    """Fetch the game's complete banner, including its built-in copy."""
+    raw_data_uri_format = getattr(info, "raw_data_uri_format", "")
+    if not raw_data_uri_format:
+        if allow_missing:
+            return None
+        raise RuntimeError("官方资源接口缺少 RawDataUriFormat，无法获取登场横幅")
+    banner_dir = cache_dir / "banners"
+    banner_dir.mkdir(parents=True, exist_ok=True)
+    language_code = "CN" if language.casefold() in {"zh-cn", "cn", "zh"} else language.upper()
+    for variant in ("01", "02"):
+        filename = f"MYPAGE_BANNER_{language_code}_{variant}{character_id:04d}.png"
+        target = banner_dir / filename
+        if target.is_file():
+            return target
+        relative_path = f"MyPageBanner/{language_code}/{filename}"
+        try:
+            download_file(info.raw_data_url(relative_path), target)
+            with Image.open(target) as banner:
+                if banner.width < 2 or banner.height < 2:
+                    raise RuntimeError(f"横幅尺寸无效: {target}")
+            return target
+        except (OSError, RuntimeError) as exc:
+            target.unlink(missing_ok=True)
+            target.with_name(target.name + ".tmp").unlink(missing_ok=True)
+            if variant == "02" and not allow_missing:
+                raise RuntimeError(f"无法获取角色 {character_id} 的官方登场横幅") from exc
+    return None
+
+
 def fetch_official_card_assets(
     character_id: int,
     skill_ids: list[int],
@@ -463,11 +513,14 @@ def fetch_official_card_assets(
     include_avatar: bool = False,
     element_icon: Path | None = None,
     arcana_character_ids: list[int] | None = None,
+    include_banner: bool = False,
+    banner_language: str = "CN",
     allow_missing: bool = False,
+    official_info: OfficialAssetInfo | None = None,
 ) -> CardAssets:
     if art_size not in {"l", "m", "w"}:
         raise ValueError("art_size 必须是 l、m 或 w")
-    info = get_official_asset_info()
+    info = official_info or get_official_asset_info()
     cache_dir = _safe_cache_dir(cache_root, info.asset_version, character_id)
     catalog_target = catalog_path or cache_dir / "catalog.json"
     if catalog_path is None and not catalog_target.is_file():
@@ -548,6 +601,17 @@ def fetch_official_card_assets(
             icons[int(asset_id)] = icon
     if avatar is not None and character_id in (arcana_character_ids or []):
         arcana_characters[character_id] = avatar
+    banner = (
+        _fetch_official_character_banner(
+            info,
+            cache_dir,
+            character_id,
+            language=banner_language,
+            allow_missing=allow_missing,
+        )
+        if include_banner
+        else None
+    )
     return CardAssets(
         art=art,
         icons=icons,
@@ -556,6 +620,7 @@ def fetch_official_card_assets(
         avatar=avatar,
         element=element_icon,
         arcana_characters=arcana_characters,
+        banner=banner,
     )
 
 
@@ -657,12 +722,14 @@ _MECHANICAL_WORDS = (
     "回合",
     "暴击",
     "防御",
+    "速度",
     "增益",
     "弱化",
     "状态",
     "效果",
     "解除",
     "发动",
+    "触发",
     "附带",
     "获得",
     "普攻",
@@ -718,6 +785,39 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
     for sentence in _sentences(upgrade):
         core = sentence.rstrip("。！？")
         applied = False
+
+        # Repeated-cast thresholds coexist with the initial effect. They are
+        # battle conditions, rather than unconditional level replacements.
+        if re.match(r"战斗中自第\d+次(?:发动|触发)此技能起，", core):
+            text = _append_sentence(text, core)
+            continue
+
+        duration_upgrade = re.fullmatch(r"(「[^」]+」)效果增加为(\d+)回合", core)
+        if duration_upgrade:
+            buff, duration = duration_upgrade.groups()
+            text, applied = _replace_sentence(
+                text,
+                lambda item: buff in item and "获得" in item,
+                r"效果持续\d+回合",
+                f"效果持续{duration}回合",
+            )
+
+        target_upgrade = re.fullmatch(r"(「[^」]+」)的附加目标增加为(.+)", core)
+        if not applied and target_upgrade:
+            buff, targets = target_upgrade.groups()
+            grant = next(
+                (item for item in _sentences(text) if buff in item and "获得" in item),
+                "",
+            )
+            actor = re.search(r"([^，。]{1,20})使(?:自己|自身)", grant)
+            if actor and targets.startswith(actor.group(1) + "与"):
+                targets = "自己" + targets[len(actor.group(1)):]
+            text, applied = _replace_sentence(
+                text,
+                lambda item: buff in item and "获得" in item,
+                r"使[^，。]*?获得(?=[^。]*" + re.escape(buff) + r")",
+                f"使{targets}获得",
+            )
 
         match = re.search(
             r"防御力、物理防御力与魔法防御力增幅分别提升为"
@@ -776,6 +876,20 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
             )
 
         if not applied:
+            match = re.search(
+                r"生命值恢复量提升为承受伤害×([\d.]+)%（最多([\d.]+)%最大生命值）",
+                core,
+            )
+            if match:
+                value, maximum = match.groups()
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: "恢复承受伤害×" in item,
+                    r"承受伤害×[\d.]+%的生命值（最多[\d.]+%最大生命值）",
+                    f"承受伤害×{value}%的生命值（最多{maximum}%最大生命值）",
+                )
+
+        if not applied:
             match = re.search(r"攻击次数(?:增加|提升)为(\d+)次", core)
             if match:
                 value = match.group(1)
@@ -787,7 +901,7 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
                 )
 
         if not applied:
-            match = re.search(r"攻击目标增加为(\d+)名随机敌人", core)
+            match = re.search(r"(?:攻击|技能)目标增加为(\d+)名随机敌人", core)
             if match:
                 value = match.group(1)
                 text, applied = _replace_sentence(
@@ -816,14 +930,27 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
 
         if not applied:
             match = re.search(
-                r"^(?:发动攻击前，)?如果(.+?)，"
+                r"^(?:发动攻击前，)?(如果.+?，|当.+?时，)"
                 r"((?:造成的)?(?:物理|魔法)?伤害提升为攻击力×[\d.]+%)$",
                 core,
             )
             if match:
                 condition, effect = match.groups()
-                text = _append_sentence(text, f"若{condition}，{effect}")
-                applied = True
+                condition = condition.rstrip("，")
+                if condition.startswith("如果"):
+                    condition = condition.removeprefix("如果")
+                elif condition.startswith("当"):
+                    condition = condition.removeprefix("当").removesuffix("时")
+                compact_condition = f"若{condition}，"
+                text, applied = _replace_sentence(
+                    text,
+                    lambda item: compact_condition in item and "攻击力×" in item,
+                    r"攻击力×[\d.]+%",
+                    re.search(r"攻击力×[\d.]+%", effect).group(0),
+                )
+                if not applied:
+                    text = _append_sentence(text, compact_condition + effect)
+                    applied = True
 
         if not applied:
             match = re.search(
@@ -866,16 +993,42 @@ def _merge_compact_upgrade(text: str, upgrade: str) -> str:
                     rf"\g<1>{value}%\2",
                 )
 
+        # A later target-count upgrade supersedes the earlier target-count
+        # sentence. Keep only the final target rule in the compact summary.
+        if not applied and "附加目标增加为" in core:
+            parts = [
+                sentence
+                for sentence in _sentences(text)
+                if "附加目标增加为" not in sentence
+            ]
+            text = "".join(parts) + core + "。"
+            applied = True
+
         if "最大生命值增幅提升为" in core:
             match = re.search(r"最大生命值增幅提升为([\d.]+)%", core)
             if match:
                 value = match.group(1)
                 text, hp_applied = _replace_sentence(
                     text,
-                    lambda item: "最大生命值" in item and "增加" in item,
+                    # The upgrade refers to the battle-start self bonus that
+                    # was introduced by the preceding level. Prefer that
+                    # sentence over an earlier conditional team bonus, whose
+                    # 30% value remains unchanged.
+                    lambda item: (
+                        "战斗开始时" in item
+                        and "额外增加" in item
+                        and "最大生命值" in item
+                    ),
                     r"(增加)[\d.]+%(最大生命值)",
                     rf"\g<1>{value}%\2",
                 )
+                if not hp_applied:
+                    text, hp_applied = _replace_sentence(
+                        text,
+                        lambda item: "最大生命值" in item and "增加" in item,
+                        r"(增加)[\d.]+%(最大生命值)",
+                        rf"\g<1>{value}%\2",
+                    )
                 applied = applied or hp_applied
 
         if not applied:
@@ -888,7 +1041,6 @@ def _compact_skill_text(skill: dict[str, Any], language: str) -> str:
     descriptions = [
         description
         for level in levels
-        # LR exclusive upgrades are shown separately in the weapon section.
         if level.get("equipment_rarity_flags") != 512
         if (description := _localized(level.get("descriptions"), language))
     ]
@@ -915,11 +1067,68 @@ def _compact_skill_text(skill: dict[str, Any], language: str) -> str:
             parts[first] = initial + "。"
             del parts[second]
             text = "".join(parts)
-    return _minify_compact_text(text)
+    text = _minify_compact_text(text)
+
+    # Keep the two parts of the Holy Sword Glow passive together: the final
+    # target upgrade belongs to the buff grant, while the heal upgrade and
+    # defeat clause describe one mechanic and read as one compact entry.
+    parts = _sentences(text)
+    target_index = next(
+        (
+            index
+            for index, sentence in enumerate(parts)
+            if "圣剑光辉" in sentence and "附加目标增加为全体友军" in sentence
+        ),
+        None,
+    )
+    if target_index is not None:
+        grant_index = next(
+            (
+                index
+                for index, sentence in enumerate(parts)
+                if "圣剑光辉" in sentence and "获得" in sentence
+            ),
+            None,
+        )
+        if grant_index is not None:
+            parts[grant_index] = re.sub(
+                r"使自己与攻击力最高的其他友军获得",
+                "使全体友军获得",
+                parts[grant_index],
+                count=1,
+            )
+            del parts[target_index]
+
+    heal_index = next(
+        (
+            index
+            for index, sentence in enumerate(parts)
+            if "圣剑光辉" in sentence and "恢复承受伤害×" in sentence
+        ),
+        None,
+    )
+    defeat_index = next(
+        (
+            index
+            for index, sentence in enumerate(parts)
+            if "失去战斗能力" in sentence
+        ),
+        None,
+    )
+    if heal_index is not None and defeat_index is not None and heal_index != defeat_index:
+        parts[heal_index] = (
+            parts[heal_index].rstrip("。")
+            + "；"
+            + parts[defeat_index].lstrip()
+        )
+        del parts[defeat_index]
+
+    return "".join(parts)
 
 
 def _minify_compact_text(text: str) -> str:
     text = text.replace("无法被解除", "无法解除")
+    text = text.replace("其他业红属性", "其他红属性")
     text = re.sub(
         r"当(.+?)发动主动技能触发恢复生命值的效果时",
         r"\1的主动技能恢复生命值时",
@@ -1109,6 +1318,23 @@ def _compact_weapon_effect_rows(
     return [("UR专效果", ur_text), ("LR专效果", lr_text)]
 
 
+def _preview_lr_skill_effect_rows(
+    skills: list[dict[str, Any]], language: str
+) -> list[tuple[str, str]]:
+    """Keep published LR skill records visible when the weapon is not published."""
+    rows = []
+    for skill in skills:
+        name = _localized(skill.get("names"), language) or f"技能 {skill.get('id')}"
+        for level in skill.get("levels") or []:
+            if level.get("equipment_rarity_flags") != 512:
+                continue
+            description = _localized(level.get("descriptions"), language)
+            if description:
+                description = re.sub(r"^强化[^，。]+[，。]", "", description)
+                rows.append(("LR技能强化（主表预览）", f"{name}：{description}"))
+    return rows
+
+
 def _skill_body_layout(
     draw: ImageDraw.ImageDraw,
     skill: dict[str, Any],
@@ -1170,9 +1396,15 @@ def _compact_body_layout(
     fonts: FontSet,
     width: int,
     height: int,
+    *,
+    maximum: int = 72,
 ) -> tuple[ImageFont.FreeTypeFont, int, int, list[list[str]]]:
     paragraphs = _sentences(text)
-    for size in range(72, 43, -1):
+    # Long new-character passive descriptions can exceed the original 44px
+    # floor even after compacting.  Keep the portrait layout fixed, but allow
+    # the body copy to step down to 24px so the complete text remains present
+    # and readable instead of rejecting the vertical card.
+    for size in range(maximum, 23, -1):
         body = _font(fonts, size)
         line_height = _line_height(draw, body, gap=max(10, size // 4))
         paragraph_gap = max(14, size // 3)
@@ -1293,16 +1525,14 @@ def _render_compact_skill_card(
     element_size = 92
     element_x = identity_x
     element_y = identity_top + 151
-    if assets.element is None:
-        raise RuntimeError(
-            f"角色 {character['id']} 缺少官方{element}属性图标"
+    title_x = element_x
+    if assets.element is not None:
+        element_image = Image.open(assets.element).convert("RGBA").resize(
+            (element_size, element_size),
+            Image.Resampling.LANCZOS,
         )
-    element_image = Image.open(assets.element).convert("RGBA").resize(
-        (element_size, element_size),
-        Image.Resampling.LANCZOS,
-    )
-    canvas.paste(element_image, (element_x, element_y), element_image)
-    title_x = element_x + element_size + 28
+        canvas.paste(element_image, (element_x, element_y), element_image)
+        title_x += element_size + 28
     draw.text(
         (title_x, identity_top + 142),
         title,
@@ -1407,6 +1637,15 @@ def _render_compact_skill_card(
         paste_rounded(assets.weapon, weapon_icon_x, weapon_icon_y, icon_size, 28)
     weapon_copy_x = weapon_icon_x + icon_size + 42
     weapon_name = _localized(weapon.get("names"), language) or "专属武器"
+    speed = character.get("speed")
+    speed_text = f"初始速度 {speed}" if isinstance(speed, int) and speed > 0 else "初始速度 暂未公开"
+    speed_face = _font(fonts, 50, medium=True)
+    speed_width = draw.textlength(speed_text, font=speed_face)
+    speed_right = weapon_x + footer_width - 40
+    draw.text(
+        (speed_right, footer_top + 72), speed_text, font=speed_face,
+        anchor="rm", fill=(255, 224, 165, 255),
+    )
     draw.text(
         (weapon_copy_x, weapon_top + 38),
         weapon_name,
@@ -1617,20 +1856,369 @@ def _render_compact_skill_card(
     return _save_card(canvas, output, "compact")
 
 
+def _render_split_skill_card(
+    payload: dict[str, Any],
+    assets: CardAssets,
+    output: Path,
+    *,
+    language: str,
+) -> Path:
+    """Trial landscape template with art at left and a two-by-two skill grid."""
+    character = payload["character"]
+    fonts = _font_candidates()
+    raw_skills = _compact_skill_records(payload, language)
+    skills = [_skill_view(skill, language) for skill in raw_skills]
+    for view, raw in zip(skills, raw_skills):
+        view["compact_text"] = _compact_skill_text(raw, language)
+    active_skills = [skill for skill in skills if skill["active"]]
+    passive_skills = [skill for skill in skills if not skill["active"]]
+    if len(active_skills) != 2 or len(passive_skills) != 2:
+        raise RuntimeError(
+            f"角色 {character['id']} 的试验模板需要 2 个主动和 2 个被动技能，"
+            f"当前为 {len(active_skills)} 个主动、{len(passive_skills)} 个被动"
+        )
+    skills = active_skills + passive_skills
+
+    weapon = payload.get("exclusive_weapon")
+    weapon_available = isinstance(weapon, dict)
+    weapon = weapon if weapon_available else {}
+    weapon_effect_rows = (
+        _compact_weapon_effect_rows(weapon, language)
+        if weapon_available
+        else _preview_lr_skill_effect_rows(raw_skills, language)
+    )
+    arcanas = [item for item in payload.get("arcanas") or [] if isinstance(item, dict)]
+    arcana = arcanas[-1] if arcanas else None
+
+    canvas = _background(SPLIT_HEIGHT, character["id"], width=SPLIT_WIDTH)
+    draw = ImageDraw.Draw(canvas)
+    margin = 48
+    gap = 28
+    left_width = 1080
+    right_left = margin + left_width + gap
+    right_width = SPLIT_WIDTH - right_left - margin
+    panel_fill = (13, 23, 36, 247)
+
+    def panel(x: int, y: int, width: int, height: int, accent: tuple[int, int, int]) -> None:
+        draw.rounded_rectangle(
+            (x, y, x + width, y + height),
+            radius=34,
+            fill=panel_fill,
+            outline=(*accent, 235),
+            width=3,
+        )
+
+    def paste_rounded(source: Path | None, x: int, y: int, size: int, radius: int) -> None:
+        if source is None:
+            draw.rounded_rectangle(
+                (x, y, x + size, y + size),
+                radius=radius,
+                fill=(39, 56, 72, 255),
+                outline=(106, 145, 170, 255),
+                width=3,
+            )
+            return
+        image = _fit_crop(Image.open(source).convert("RGBA"), (size, size), focus=(0.5, 0.5))
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=255)
+        canvas.paste(image, (x, y), Image.composite(image.getchannel("A"), mask, mask))
+
+    def fitted_face(
+        text: str, preferred: int, minimum: int, width: int,
+        *, serif: bool = False, medium: bool = False,
+    ):
+        face = _font(fonts, preferred, serif=serif, medium=medium)
+        while draw.textlength(text, font=face) > width and face.size > minimum:
+            face = _font(fonts, face.size - 1, serif=serif, medium=medium)
+        return face
+
+    # Keep the native banner intact, followed by two identity rows and full artwork.
+    visual_top, visual_bottom = margin, 1880
+    panel(margin, visual_top, left_width, visual_bottom - visual_top, (197, 126, 60))
+    banner_x, banner_y, banner_width = margin + 40, visual_top + 30, 1000
+    banner_bottom = banner_y + 500
+    if assets.banner is not None:
+        banner = Image.open(assets.banner).convert("RGBA")
+        banner_size = (banner_width, round(banner_width * banner.height / banner.width))
+        banner = banner.resize(banner_size, Image.Resampling.LANCZOS)
+        banner_x = margin + (left_width - banner_size[0]) // 2
+        canvas.paste(banner, (banner_x, banner_y), banner)
+        banner_bottom = banner_y + banner_size[1]
+    else:
+        draw.rounded_rectangle(
+            (banner_x, banner_y, banner_x + banner_width, banner_bottom),
+            radius=20, fill=(28, 43, 57, 255), outline=(85, 112, 133, 255), width=2,
+        )
+        draw.text(
+            (banner_x + banner_width / 2, banner_y + 250), "官方横幅暂未公开",
+            font=_font(fonts, 48, medium=True), anchor="mm", fill=(174, 194, 207, 255),
+        )
+
+    title, subtitle, element = _compact_identity_copy(character, language)
+    identity_y = banner_bottom + 32
+    identity_face = _font(fonts, 52, medium=True)
+    icon_size = 64
+    identity_items = (
+        (assets.element, f"{element}属性"),
+        (assets.job_icon, JOB_NAMES.get(character.get("job_flags"), "未知")),
+        (None, f"ID {character['id']}"),
+    )
+    identity_width = sum(
+        draw.textlength(label, font=identity_face) + (icon_size + 14 if source is not None else 0)
+        for source, label in identity_items
+    ) + 80
+    identity_x = margin + (left_width - identity_width) / 2
+    for source, label in identity_items:
+        if source is not None:
+            paste_rounded(source, round(identity_x), identity_y, icon_size, 12)
+            identity_x += icon_size + 14
+        text_bounds = draw.textbbox((0, 0), label, font=identity_face, anchor="lt")
+        text_height = text_bounds[3] - text_bounds[1]
+        draw.text(
+            (identity_x, identity_y + (icon_size - text_height) / 2 - text_bounds[1]), label,
+            font=identity_face, anchor="lt", fill=(223, 227, 224, 255),
+        )
+        identity_x += draw.textlength(label, font=identity_face) + 40
+
+    preview_notice = payload.get("preview_notice")
+    preview_notice = preview_notice if isinstance(preview_notice, str) else ""
+    notice_face = _font(fonts, 36, medium=True)
+    notice_width = draw.textlength(preview_notice, font=notice_face) + 28 if preview_notice else 0
+    notice_gap = 28 if preview_notice else 0
+    name_face = fitted_face(
+        f"{subtitle} {title}", 60, 48,
+        left_width - 100 - notice_width - notice_gap, medium=True,
+    )
+    name_gap = 18 if subtitle else 0
+    name_width = draw.textlength(subtitle + title, font=name_face) + name_gap
+    name_x = margin + (left_width - name_width - notice_width - notice_gap) / 2
+    name_y = identity_y + 96
+    draw.text(
+        (name_x, name_y), subtitle,
+        font=name_face, anchor="lt", fill=(244, 181, 78, 255),
+    )
+    draw.text(
+        (name_x + draw.textlength(subtitle, font=name_face) + name_gap, name_y), title,
+        font=name_face, anchor="lt", fill=(255, 247, 232, 255),
+    )
+    if preview_notice:
+        notice_x = name_x + name_width + notice_gap
+        draw.rounded_rectangle(
+            (notice_x, name_y + 2, notice_x + notice_width, name_y + 58),
+            radius=10, fill=(84, 61, 35, 255), outline=(197, 145, 77, 255), width=2,
+        )
+        draw.text(
+            (notice_x + notice_width / 2, name_y + 30), preview_notice,
+            font=notice_face, anchor="mm", fill=(255, 220, 160, 255),
+        )
+
+    art_limit = 1000
+    art_y = identity_y + 190
+    if assets.art is not None:
+        source_art = Image.open(assets.art).convert("RGBA")
+        art = source_art.copy()
+        art.thumbnail((art_limit, art_limit), Image.Resampling.LANCZOS)
+        art_x = margin + (left_width - art.width) // 2
+        canvas.paste(art, (art_x, art_y), art)
+    else:
+        art_x = margin + (left_width - art_limit) // 2
+        draw.rounded_rectangle(
+            (art_x, art_y, art_x + art_limit, art_y + art_limit),
+            radius=20, fill=(28, 43, 57, 255), outline=(85, 112, 133, 255), width=2,
+        )
+        draw.text(
+            (art_x + art_limit / 2, art_y + art_limit / 2), "官方立绘暂未公开",
+            font=_font(fonts, 48, medium=True), anchor="mm", fill=(174, 194, 207, 255),
+        )
+
+    # The wide footer gives weapon and arcana copy the same readable scale as skills.
+    footer_top, footer_bottom = 1908, SPLIT_HEIGHT - margin
+    footer_gap = 28
+    footer_width = (SPLIT_WIDTH - margin * 2 - footer_gap) // 2
+    weapon_x = margin
+    arcana_x = margin + footer_width + footer_gap
+    panel(weapon_x, footer_top, footer_width, footer_bottom - footer_top, (197, 126, 60))
+    panel(arcana_x, footer_top, footer_width, footer_bottom - footer_top, (68, 116, 153))
+    weapon_icon = 145
+    paste_rounded(assets.weapon, weapon_x + 30, footer_top + 28, weapon_icon, 26)
+    weapon_name = _localized(weapon.get("names"), language) or "专属武器"
+    speed = character.get("speed")
+    speed_text = f"初始速度 {speed}" if isinstance(speed, int) and speed > 0 else "初始速度 暂未公开"
+    speed_face = _font(fonts, 50, medium=True)
+    speed_width = draw.textlength(speed_text, font=speed_face)
+    speed_right = weapon_x + footer_width - 40
+    draw.text(
+        (speed_right, footer_top + 72), speed_text, font=speed_face,
+        anchor="rm", fill=(255, 224, 165, 255),
+    )
+    draw.text(
+        (weapon_x + 210, footer_top + 32),
+        weapon_name,
+        font=fitted_face(weapon_name, 64, 48, footer_width - 290 - speed_width, medium=True),
+        fill=(255, 239, 205, 255),
+        stroke_width=1, stroke_fill=(255, 239, 205, 255),
+    )
+    stat_parts: list[str] = []
+    for effect in weapon.get("passive_effects") or []:
+        name = PARAMETER_NAMES_ZH_CN.get(str(effect.get("parameter_code")), str(effect.get("parameter_code")))
+        stat_parts.append(f"{name} {effect.get('value_text') or ''}")
+    if not weapon_available:
+        stat_parts.append("官方数据暂未公开")
+    stat_face = _font(fonts, 43)
+    stat_lines = _wrap(draw, "  ".join(stat_parts), stat_face, footer_width - 250)
+    for line_index, line in enumerate(stat_lines[:2]):
+        draw.text(
+            (weapon_x + 210, footer_top + 111 + line_index * 54),
+            line,
+            font=stat_face,
+            fill=(255, 224, 165, 255),
+        )
+    draw.line((weapon_x + 30, footer_top + 225, weapon_x + footer_width - 30, footer_top + 225), fill=(197, 126, 60, 120), width=2)
+    effect_y = footer_top + 255
+    effect_body = _font(fonts, 54)
+    effect_width = footer_width - 310
+    for label, effect_text in weapon_effect_rows:
+        if not weapon_available:
+            draw.text(
+                (weapon_x + 30, effect_y), label,
+                font=_font(fonts, 38, medium=True), fill=(229, 194, 132, 255),
+            )
+            effect_y += 62
+            for line in _wrap(draw, effect_text, effect_body, footer_width - 60):
+                draw.text((weapon_x + 30, effect_y), line, font=effect_body, fill=(244, 241, 233, 255))
+                effect_y += 70
+            effect_y += 16
+            continue
+        lines = [line for sentence in _sentences(effect_text) for line in _wrap(draw, sentence, effect_body, effect_width)]
+        label_width = 195
+        draw.rounded_rectangle((weapon_x + 30, effect_y, weapon_x + 30 + label_width, effect_y + 66), radius=11, fill=(143, 91, 157, 255) if label.startswith("UR") else (192, 117, 48, 255))
+        label_face = _font(fonts, 38, medium=True)
+        draw.text((weapon_x + 30 + (label_width - draw.textlength(label, font=label_face)) / 2, effect_y + 6), label, font=label_face, fill=(255, 249, 237, 255))
+        for line in lines:
+            draw.text((weapon_x + 255, effect_y), line, font=effect_body, fill=(244, 241, 233, 255))
+            effect_y += 70
+        effect_y += 16
+    if effect_y > footer_bottom - 10:
+        raise RuntimeError("专武效果文本超出横版模板页脚")
+
+    arcana_name = "暂未配置"
+    arcana_summary = "官方 Master 尚未提供该角色的秘仪关系。"
+    if arcana is not None:
+        arcana_name = _localized(arcana.get("names"), language) or f"秘仪 {arcana.get('id')}"
+        levels = [item for item in arcana.get("levels") or [] if isinstance(item, dict)]
+        final_level = next((item for item in levels if item.get("character_rarity_flags") == 512), {})
+        summary_parts = []
+        for effect in final_level.get("effects") or []:
+            name = PARAMETER_NAMES_ZH_CN.get(str(effect.get("parameter_code")), str(effect.get("parameter_code")))
+            summary_parts.append(f"{name} {effect.get('value_text') or ''}")
+        arcana_summary = " · ".join(summary_parts) or "LR效果未配置"
+    def draw_centered_left(
+        text: str, x: int, center_y: float, font: ImageFont.FreeTypeFont, **kwargs: Any
+    ) -> None:
+        bounds = draw.textbbox((0, 0), text, font=font, anchor="lt")
+        visible_height = bounds[3] - bounds[1]
+        draw.text(
+            (x, center_y - visible_height / 2 - bounds[1]),
+            text,
+            font=font,
+            anchor="lt",
+            **kwargs,
+        )
+
+    arcana_row_center = footer_top + 65
+    draw_centered_left(
+        "秘仪", arcana_x + 30, arcana_row_center,
+        _font(fonts, 42, medium=True), fill=(174, 209, 230, 255),
+    )
+    draw_centered_left(
+        arcana_name, arcana_x + 160, arcana_row_center,
+        fitted_face(arcana_name, 64, 48, footer_width - 200, medium=True),
+        fill=(226, 239, 246, 255), stroke_width=1,
+        stroke_fill=(226, 239, 246, 255),
+    )
+    arcana_effect_center = footer_top + 145
+    draw_centered_left(
+        "LR效果", arcana_x + 30, arcana_effect_center,
+        _font(fonts, 38, medium=True), fill=(174, 209, 230, 255),
+    )
+    arcana_face = _font(fonts, 54)
+    arcana_lines = _wrap(draw, arcana_summary, arcana_face, footer_width - 270)
+    for line_index, line in enumerate(arcana_lines):
+        draw_centered_left(
+            line, arcana_x + 205, arcana_effect_center + line_index * 66,
+            arcana_face, fill=(239, 241, 239, 255),
+        )
+    draw.line((arcana_x + 30, footer_top + 255, arcana_x + footer_width - 30, footer_top + 255), fill=(93, 139, 168, 150), width=2)
+    draw.text((arcana_x + 30, footer_top + 276), "解锁角色", font=_font(fonts, 42, medium=True), fill=(174, 209, 230, 255))
+    required_characters = arcana.get("required_characters") or [] if isinstance(arcana, dict) else []
+    for index, required in enumerate(required_characters[:4]):
+        column, row = index % 2, index // 2
+        tile_x = arcana_x + 30 + column * 890
+        tile_y = footer_top + 342 + row * 105
+        character_id = required.get("id") if isinstance(required, dict) else None
+        paste_rounded(assets.arcana_characters.get(character_id), tile_x, tile_y, 88, 18)
+        required_name = (_localized(required.get("names"), language) if isinstance(required, dict) else None) or "待公布"
+        draw.text((tile_x + 105, tile_y + 16), required_name, font=fitted_face(required_name, 50, 38, 680), fill=(232, 237, 238, 255))
+
+    # Right text column: active skills on the first row, passive skills below.
+    skill_gap = 20
+    skill_width = (right_width - skill_gap) // 2
+    active_height = 760
+    passive_height = visual_bottom - margin - skill_gap - active_height
+    accents = ((197, 126, 60), (68, 116, 153))
+    for index, skill in enumerate(skills):
+        column, row = index % 2, index // 2
+        x = right_left + column * (skill_width + skill_gap)
+        y = margin if row == 0 else margin + active_height + skill_gap
+        skill_height = active_height if row == 0 else passive_height
+        accent = accents[0 if skill["active"] else 1]
+        panel(x, y, skill_width, skill_height, accent)
+        icon_path = assets.icons.get(skill["id"])
+        if icon_path is not None:
+            paste_rounded(icon_path, x + 25, y + 15, 140, 24)
+        heading_x = x + 189
+        draw.text(
+            (heading_x, y + 21), skill["name"],
+            font=fitted_face(skill["name"], 70, 52, skill_width - 185, medium=True),
+            fill=(255, 247, 232, 255), stroke_width=1,
+            stroke_fill=(255, 247, 232, 255),
+        )
+        draw.text((heading_x, y + 110), skill["tag"], font=_font(fonts, 38, medium=True), fill=(229, 194, 132, 255) if skill["active"] else (175, 207, 228, 255))
+        draw.line((x + 30, y + 160, x + skill_width - 30, y + 160), fill=(*accent, 125), width=2)
+        body, line_height, paragraph_gap, paragraphs = _compact_body_layout(
+            draw, skill["compact_text"], fonts, skill_width - 112, skill_height - 220,
+            maximum=54,
+        )
+        cursor = y + 194
+        for paragraph in paragraphs:
+            bullet_y = cursor + max(18, line_height // 2 - 6)
+            draw.ellipse((x + 29, bullet_y, x + 43, bullet_y + 14), fill=(*accent, 255))
+            for line in paragraph:
+                draw.text((x + 67, cursor), line, font=body, fill=(242, 241, 235, 255))
+                cursor += line_height
+            cursor += paragraph_gap
+
+    watermark_face = _font(fonts, 24, medium=True)
+    watermark_x = SPLIT_WIDTH - 24 - draw.textlength(COMPACT_WATERMARK, font=watermark_face)
+    draw.text((watermark_x, SPLIT_HEIGHT - 36), COMPACT_WATERMARK, font=watermark_face, fill=(123, 115, 105, 255))
+
+    return _save_card(canvas, output, "split")
+
+
 def render_skill_card(
     payload: dict[str, Any],
     assets: CardAssets,
     output: Path,
     *,
     language: str = "zh-CN",
-    mode: str = "full",
+    mode: str = "split",
 ) -> Path:
     if mode == "compact":
-        return _render_compact_skill_card(
-            payload, assets, output, language=language
-        )
+        raise ValueError("竖版模板已停用，请使用 split 横版模板")
+    if mode == "split":
+        return _render_split_skill_card(payload, assets, output, language=language)
     if mode != "full":
-        raise ValueError("mode 必须是 full 或 compact")
+        raise ValueError("mode 必须是 full 或 split；旧竖版模板已停用")
     fonts = _font_candidates()
     character = payload["character"]
     skills = [
@@ -1901,9 +2489,9 @@ def parse_args():
     parser.add_argument("--art-size", choices=("l", "m", "w"), default="l")
     parser.add_argument(
         "--mode",
-        choices=("full", "compact", "both"),
-        default="full",
-        help="full=官方全文版，compact=满强化省流版，both=两版都生成",
+        choices=("split",),
+        default="split",
+        help="统一使用 split 横版角色模板（3840×2500）；旧竖版模板已停用",
     )
     return parser.parse_args()
 
@@ -1936,13 +2524,13 @@ def main() -> int:
             character_id = payload["character"]["id"]
             skills = (
                 _compact_skill_records(payload, args.language)
-                if args.mode in ("compact", "both")
+                if args.mode in ("compact", "split", "both")
                 else _display_skill_records(payload)
             )
             weapon = payload.get("exclusive_weapon")
             weapon_icon_id = (
                 weapon.get("icon_id")
-                if args.mode in ("compact", "both") and isinstance(weapon, dict)
+                if args.mode in ("compact", "split", "both") and isinstance(weapon, dict)
                 else None
             )
             element_type = payload["character"].get("element_type")
@@ -1954,6 +2542,15 @@ def main() -> int:
             )
             if not element_icon.is_file():
                 element_icon = None
+            job_icon_name = {1: "warrior", 2: "sniper", 4: "sorcerer"}.get(
+                payload["character"].get("job_flags")
+            )
+            job_icon = (
+                args.skills_dir.parent / "assets" / "ui" / f"icon_job_{job_icon_name}.png"
+                if job_icon_name else None
+            )
+            if job_icon is not None and not job_icon.is_file():
+                job_icon = None
             arcana_character_ids = (
                 [
                     int(item.get("id"))
@@ -1962,7 +2559,7 @@ def main() -> int:
                     for item in arcana.get("required_characters") or []
                     if isinstance(item, dict) and isinstance(item.get("id"), int)
                 ]
-                if args.mode in ("compact", "both")
+                if args.mode in ("compact", "split", "both")
                 else []
             )
             assets = fetch_official_card_assets(
@@ -1971,14 +2568,27 @@ def main() -> int:
                 args.cache_dir,
                 art_size=args.art_size,
                 weapon_icon_id=weapon_icon_id,
-                include_avatar=args.mode in ("compact", "both"),
+                include_avatar=args.mode in ("compact", "split", "both"),
                 element_icon=element_icon,
                 arcana_character_ids=arcana_character_ids,
-                allow_missing=args.mode == "compact",
+                include_banner=args.mode == "split",
+                banner_language="CN",
+                allow_missing=args.mode in ("compact", "split"),
+            )
+            assets = CardAssets(
+                art=assets.art,
+                icons=assets.icons,
+                asset_version=assets.asset_version,
+                weapon=assets.weapon,
+                avatar=assets.avatar,
+                element=assets.element,
+                arcana_characters=assets.arcana_characters,
+                job_icon=job_icon,
+                banner=assets.banner,
             )
             modes = ("full", "compact") if args.mode == "both" else (args.mode,)
             for mode in modes:
-                suffix = "" if mode == "full" else "-compact"
+                suffix = "" if mode == "full" else f"-{mode}"
                 target = args.output or (
                     args.output_dir
                     / f"character-{character_id:06d}{suffix}-{args.language}.png"
@@ -2007,6 +2617,7 @@ def main() -> int:
                             "source_sha256": _sha256(source),
                             "template_version": _template_version(mode),
                             "asset_version": assets.asset_version,
+                            "initial_speed": payload["character"].get("speed"),
                             "width": width,
                             "height": height,
                             "sha256": _sha256(rendered),

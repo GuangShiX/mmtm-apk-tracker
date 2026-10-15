@@ -515,9 +515,15 @@ def _carry_forward_same_version_repository_assets(
     staging: Path,
     entries: list[dict[str, Any]],
 ) -> int:
-    """Retain catalog-only assets while rebuilding the same app package version."""
+    """Keep selected old assets when the package/catalog no longer contains them."""
     current = _load_repository_manifest(output_dir)
-    if current is None or current.get("version") != version:
+    if current is None:
+        return 0
+    previous_version = current.get("version")
+    same_version = previous_version == version
+    if not same_version and (
+        not isinstance(previous_version, str) or not previous_version
+    ):
         return 0
     known = {(entry["category"], entry["name"]) for entry in entries}
     carried = 0
@@ -531,9 +537,20 @@ def _carry_forward_same_version_repository_assets(
             # A curated request may have been intentionally removed. Only
             # carry assets that are still selected by the current rules.
             continue
+        if not same_version:
+            request = requested_asset_for_name(key[1])
+            if (
+                request is None
+                or request.key != key
+                or request.delivery not in {"addressables", "package-or-addressables"}
+            ):
+                continue
         relative = old_entry.get("path")
         if not isinstance(relative, str):
             raise RuntimeError(f"既有资产仓库路径无效: {key}")
+        expected_relative = (Path("assets") / key[0] / key[1]).as_posix()
+        if relative != expected_relative:
+            raise RuntimeError(f"既有资产仓库路径不规范: {relative} != {expected_relative}")
         old_path = (output_dir / relative).resolve()
         new_path = (staging / relative).resolve()
         try:
@@ -549,11 +566,17 @@ def _carry_forward_same_version_repository_assets(
             raise RuntimeError(f"既有资产仓库文件校验失败: {relative}")
         new_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(old_path, new_path)
-        entries.append(dict(old_entry))
+        carried_entry = dict(old_entry)
+        if not same_version:
+            carried_entry["preserved_from_version"] = previous_version
+        entries.append(carried_entry)
         known.add(key)
         carried += 1
     if carried:
-        print(f"  保留同版本 catalog 专属资产: {carried} 个")
+        if same_version:
+            print(f"  保留同版本 catalog 专属资产: {carried} 个")
+        else:
+            print(f"  保留仍在登记的跨版本下载资产: {carried} 个（来源 {previous_version}）")
     return carried
 
 
