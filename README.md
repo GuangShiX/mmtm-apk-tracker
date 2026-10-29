@@ -116,6 +116,10 @@ python master.py \
 
 导出结果位于 `skills/`。`latest.json` 按 `StartTimeFixJST` 判断最新已实装角色，不依赖不连续的角色编号；未来时间的占位记录不会提前发布。若某个新角色已进入技能 MasterBook、但官方语言表尚未加入对应键，JSON 会将 `localization_complete` 设为 `false`，列出缺失键并保留技能记录中的日文 `Memo` 分段原文，后续 Master 更新会自动补齐官方文本。
 
+### 维护期间的云端检测
+
+GitHub 的 [Watch official maintenance and new character data](https://github.com/GuangShiX/mmtm-apk-tracker/actions/workflows/watch-maintenance.yml) 定期检查官方维护公告，窗口内以 20 秒为目标间隔检测 app、asset、master 及主表目录签名。发现更新后先交付技能简报与派生 JSON，再由独立任务生成横版海报；原始主表不上传到公开产物。部署、日志与验收步骤见[云端维护检测](docs/cloud-maintenance-watch.md)。
+
 ### 通用技能介绍图
 
 推荐从统一的[角色发布流程](docs/character-release-workflow.md)开始：
